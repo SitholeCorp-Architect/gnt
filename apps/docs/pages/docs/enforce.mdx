@@ -1,0 +1,69 @@
+---
+title: Enforce before acting
+sidebar_icon: shield-check
+description: Wire check_action into a PreToolUse hook or a system prompt so an agent can't skip enforcement.
+---
+
+Retrieval tells an agent what the policy is; `check_action` stops it from breaking it. Call it right
+before a side-effectful step and branch on the verdict: proceed on `allowed`, stop and cite the rule
+on `blocked`, escalate on `needs_human`. There are two natural places to wire it in.
+
+## Claude Code PreToolUse hook
+
+A `PreToolUse` hook runs before every tool call. This one checks the guarded, world-changing tools
+against your rules and blocks the call on `blocked` or `needs_human`, so enforcement doesn't depend
+on the model choosing to ask.
+
+```python
+# .claude/hooks/gnt_check.py: a PreToolUse hook that asks gnt before
+# any world-changing tool call runs. Wire it in .claude/settings.json.
+import asyncio, json, sys
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+URL = "https://api.gntai.dev/mcp/"
+TOKEN = "gnt_live_xxxx"
+# Only gate tools that actually change the world; let reads through.
+GUARDED = {"Bash", "Write", "Edit", "WebFetch"}
+
+async def check(description):
+    async with streamablehttp_client(
+        URL, headers={"Authorization": f"Bearer {TOKEN}"}
+    ) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            res = await session.call_tool(
+                "check_action", {"description": description}
+            )
+            return json.loads(res.content[0].text)
+
+event = json.load(sys.stdin)
+if event["tool_name"] not in GUARDED:
+    sys.exit(0)  # not side-effectful; let it through
+
+verdict = asyncio.run(check(json.dumps(event["tool_input"])))
+if verdict["verdict"] == "blocked":
+    print(json.dumps({"decision": "block", "reason": verdict["reason"]}))
+elif verdict["verdict"] == "needs_human":
+    print(json.dumps({"decision": "block",
+        "reason": "Escalate to a human: " + verdict["reason"]}))
+# "allowed" → exit 0 with no output, and the tool call proceeds.
+```
+
+## System prompt instruction
+
+For agents without a hook layer, add a standing policy-check instruction to the system prompt. Pair
+it with the hook above for defense in depth: the prompt guides the model, the hook enforces
+regardless.
+
+```text
+Before any action that sends a message, moves money, deletes data, or is
+otherwise hard to undo, first call the check_action tool with a plain-
+English description of what you are about to do.
+
+- verdict "allowed": proceed.
+- verdict "blocked": do not proceed. Tell the user why, citing the rule.
+- verdict "needs_human": stop and ask a human to approve before acting.
+
+Never treat a missing or unclear verdict as permission to act.
+```

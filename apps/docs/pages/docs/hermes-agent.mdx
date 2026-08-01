@@ -1,0 +1,79 @@
+---
+title: Hermes Agent
+sidebar_icon: bot
+description: Connect Nous Research's Hermes Agent to gnt-brain's MCP tools and its check_action skill.
+---
+
+Nous Research's Hermes Agent reads MCP servers straight out of its own config file. Connecting it to
+gnt makes the 5 tools above available the same way they are anywhere else. The part that actually
+matters is getting Hermes to call `check_action` before it acts, which the skill below does.
+
+## Connect it
+
+`gnt connect hermes` looks for a local Hermes install (`~/.hermes`), shows you the exact block it
+wants to add to `~/.hermes/config.yaml`, and writes nothing until you say yes. Once you confirm, it
+mints a fresh MCP key and prints it once for you to export. The key itself never touches the config
+file, only a `${GNT_MCP_KEY}` reference does.
+
+```text
+$ gnt connect hermes
+
+✓ Connected. gnt's MCP tools are now available to Hermes.
+```
+
+## Or add it by hand
+
+Hermes reads MCP servers from a top-level `mcp_servers` key in `~/.hermes/config.yaml`. Paste the
+block below as-is, including the `${GNT_MCP_KEY}` reference. Don't inline a real key there. Get one
+from `gnt keys create`, then `export GNT_MCP_KEY=<that key>` in your shell (or add it to
+`~/.hermes/.env`, Hermes's own place for secrets) before starting Hermes, or `/reload-mcp` in a
+running session.
+
+```yaml
+mcp_servers:
+  gnt:
+    url: "https://api.gntai.dev/mcp/"
+    headers:
+      Authorization: "Bearer ${GNT_MCP_KEY}"
+    tools:
+      include: [check_action, search_rules, get_rule, list_skill_packs, get_skill_pack]
+      resources: false
+      prompts: false
+```
+
+## Install the skill
+
+Connecting the MCP server only makes the tools available. Nothing makes Hermes call them before
+acting on its own. The `gnt-check-action` skill closes that gap: it tells Hermes exactly when and how
+to call `check_action`, in Hermes's own SKILL.md format, installable straight from a URL, no repo
+clone required.
+
+```text
+$ hermes skills install https://gntai.dev/skills/hermes/SKILL.md
+```
+
+Same instruction as the [Enforce](/docs/enforce) page's system prompt block, every surface teaches it
+the same way:
+
+```text
+Before any action that sends a message, moves money, deletes data, or is
+otherwise hard to undo, first call the check_action tool with a plain-
+English description of what you are about to do.
+
+- verdict "allowed": proceed.
+- verdict "blocked": do not proceed. Tell the user why, citing the rule.
+- verdict "needs_human": stop and ask a human to approve before acting.
+
+Never treat a missing or unclear verdict as permission to act.
+```
+
+For a standing instruction Hermes reads on every session in a given project rather than one it has to
+decide to load, drop the same instruction in that project's own `HERMES.md` (or `AGENTS.md`, which
+Hermes also reads) instead. See [/skills/hermes/HERMES.md](https://gntai.dev/skills/hermes/HERMES.md)
+for a ready-made one.
+
+## What Hermes calls these tools
+
+Hermes registers MCP tools as `mcp_<server>_<tool>`. With the server named `gnt` (as above), that's
+`mcp_gnt_check_action`, `mcp_gnt_search_rules`, `mcp_gnt_get_rule`, `mcp_gnt_list_skill_packs`, and
+`mcp_gnt_get_skill_pack`. The skill above already accounts for the prefix.

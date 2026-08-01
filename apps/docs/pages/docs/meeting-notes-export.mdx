@@ -1,0 +1,53 @@
+---
+title: Meeting notes export
+sidebar_icon: file-text
+description: Read Otter, Fireflies, or Fathom transcript exports, auto-detected per file.
+---
+
+`gnt prebrain --meeting-notes` reads meeting-transcript exports from Otter, Fireflies, or Fathom.
+Point it at a directory or a single file and it auto-detects each file's shape, no per-tool flag
+needed, no gnt server ever in the read path.
+
+## Otter
+
+Open a conversation, use the export option in its menu, and choose a format. Every plan can export
+**TXT**; paid plans add **DOCX**, **PDF**, and **SRT**. Either TXT or SRT works here, no need to pick
+one over the other for this to read it.
+
+## Fireflies
+
+From a meeting's notepad, use the download option and choose a format: **DOCX**, **PDF**, **SRT**,
+**CSV**, **JSON**, or **MD**. SRT or MD both work here; turn on the timestamp and speaker-label
+toggles if the export screen offers them, since a transcript reads better with both.
+
+## Fathom
+
+Fathom has no file export at all. From a recorded call, the **Copy Transcript** button above the
+transcript copies it to your clipboard, and that's the only built-in path. Paste it into a plain text
+file and save it with a `.txt` extension, then point `--meeting-notes` at the folder you're saving
+those into.
+
+## Point it at your exports
+
+A directory of exported files, or a single file, both work. `.vtt`, `.srt`, `.txt`, and `.md` files
+are read; which one a given file actually is gets sniffed from its own content, not trusted from its
+extension, so a mislabeled file still parses correctly.
+
+```text
+$ gnt prebrain --meeting-notes ~/Exports/meeting-transcripts
+
+Found 58 candidate chunks:
+  Meeting notes export: 58 chunks across 14 files
+```
+
+## What it reads, and what it never does
+
+A cue-timestamped file (SRT, or VTT if a tool you bridge through produces one) has its cues merged
+back into full spoken turns before anything else happens. Caption exports slice a single sentence
+across several short cues, and reading each cue as its own turn would fragment ordinary dialogue and
+misread where one person stopped talking and another started. A plain-text file's speaker and
+timestamp markup is read the same way, whichever of Otter's, Fireflies', or Fathom's line shapes it
+uses.
+
+Same as every other prebrain walker: everything above happens on your device before the privacy gate
+runs, and only masked text ever reaches extraction.

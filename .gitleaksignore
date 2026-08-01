@@ -1,0 +1,9 @@
+# Specific, documented findings only — never a blanket path/rule exclusion.
+# Each entry below is a real gitleaks hit that isn't a real secret; the
+# justification lives next to it. Re-baseline (don't just delete) if the
+# underlying value ever changes.
+#
+# This file starts fresh as of this repo's history reset (Apache-2.0 public
+# cut, orphan root commit) — every prior entry was fingerprinted to a
+# private-repo commit SHA that doesn't exist in this repo's history at all,
+# so carrying them forward would just be dead weight.

@@ -1,0 +1,50 @@
+---
+title: Quickstart
+sidebar_icon: rocket
+description: Connect gnt-brain to any MCP-capable agent. Check an action or query a rule in one call.
+---
+
+New org? Run `gnt prebrain` first. It scans this repo and drafts your first rules automatically;
+add `--docs` or `--notion` to also pull from a docs folder or a Notion export. This page covers the
+other half: connecting an agent once approved rules exist.
+
+One MCP endpoint, 5 tools. Connect any MCP-capable agent and it can check an action against your
+rules before taking it, search your org's approved rules, fetch one by id, and pull the compiled
+skill pack. Nothing an agent sees hasn't already been merged as a pull request by a human.
+
+```bash
+$ claude mcp add gnt-brain \
+    https://api.gntai.dev/mcp/ \
+    --header "Authorization: Bearer gnt_live_xxxx"
+
+✓ gnt-brain connected · 5 tools ready
+```
+
+Get your key and endpoint with `gnt keys create`, then run the command above from any MCP-capable
+client. Claude Code, Claude Desktop, or your own agent over the streamable HTTP transport all work
+the same way.
+
+That merge is the whole approval step, and it works the same way no matter where a rule came from.
+`gnt prebrain` opens its own pull requests directly; anything else, a webhook, Slack's `/brain`, a
+rule typed by hand, goes through `gnt review`, which renders it to markdown, opens the PR, and flags
+anything that looks like a duplicate or contradiction of an existing rule right in the PR body. A
+human reviews the diff like any other code change, and merging it is the approval: that same merge
+recompiles the org's skill pack and makes the rule searchable. Nothing reaches an agent that hasn't
+gone through a real, merged PR.
+
+`gnt connect github` connects that repo through a real GitHub App, not a pasted personal access
+token. It asks for exactly three permissions: **Contents (read/write)**, to read a rule file's
+current content and write the branch a proposal opens on; **Pull requests (read/write)**, to open,
+read, and close the PRs that carry every proposal and every approval; and **Metadata (read-only)**,
+GitHub's own forced minimum for any App, no App can ask for less. No org, issues, actions, or admin
+scope of any kind. Installation is scoped to the one repo you pick during install, not your whole
+account, and every token gnt uses against it is minted per request and expires within the hour,
+nothing long-lived sits in gnt's database the way a PAT used to. The webhook that confirms a merge
+is managed by the App itself, not something you register by hand. `gnt connect github --pat` still
+works if you'd rather paste a fine-grained token instead; an org already on that flow runs
+`gnt connect github --upgrade` to move over.
+
+gnt is open source under Apache-2.0. Everything above also runs as a self-hosted
+`docker compose up` on your own infrastructure, with your own keys, instead of the hosted service. See
+[docs/self-hosting/README.md](https://github.com/gnt-ai/gnt/blob/main/docs/self-hosting/README.md)
+in the repo for the full walkthrough.

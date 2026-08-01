@@ -1,0 +1,74 @@
+---
+title: Other MCP clients
+sidebar_icon: blocks
+description: Connect Cursor, or anything else that speaks MCP, to the same endpoint and key.
+---
+
+The [Connect](/docs/connect) page covers claude.ai and Claude Code specifically, and OpenClaw and
+Hermes each get their own deeper, harness-specific guide with a distributable skill baked in. This
+page is the generic version underneath all of those: point Cursor, or anything else that speaks MCP,
+at the same endpoint with the same key, and it gets the same 5 tools and the same `check_action`
+discipline.
+
+## Point it at the endpoint
+
+Most MCP-capable clients take a remote server as a URL plus headers, either in a config file directly
+or a settings UI that writes one for you. The shape below is what a remote HTTP server entry looks
+like; if your client's config uses different key names, the three fields it's asking for are always
+the same: a name for the server, this URL, and the bearer header.
+
+```json
+{
+  "mcpServers": {
+    "gnt-brain": {
+      "url": "https://api.gntai.dev/mcp/",
+      "headers": {
+        "Authorization": "Bearer gnt_live_xxxx"
+      }
+    }
+  }
+}
+```
+
+## Get a key
+
+`gnt keys create` mints an org-scoped MCP key and prints the endpoint alongside it. The key is shown
+once, so paste both straight into the config above.
+
+```text
+$ gnt keys create
+
+MCP URL: https://api.gntai.dev/mcp/
+Key:     gnt_live_xxxxxxxxxxxxxxxx
+
+# Shown once -- copy it now.
+```
+
+## Teach it the check_action discipline
+
+Connecting the endpoint only makes the 5 tools available. Nothing makes a harness actually call
+`check_action` before it acts. Paste this into the client's system prompt or custom instructions
+field.
+
+```text
+Before any action that sends a message, moves money, deletes data, or is
+otherwise hard to undo, first call the check_action tool with a plain-
+English description of what you are about to do.
+
+- verdict "allowed": proceed.
+- verdict "blocked": do not proceed. Tell the user why, citing the rule.
+- verdict "needs_human": stop and ask a human to approve before acting.
+
+Never treat a missing or unclear verdict as permission to act.
+
+For company-specific context beyond a single action -- answering a
+question about policy, or working from a standing set of rules instead
+of one check -- call search_rules with a plain-English query, or pull a
+compiled skill pack with list_skill_packs / get_skill_pack. Only rules a
+human has approved are ever returned.
+```
+
+If your client supports a hook layer, something that runs before a tool call regardless of what the
+model decides, the way a `PreToolUse` hook does, pair this prompt with that hook pattern on the
+[Enforce](/docs/enforce) page for defense in depth: the prompt guides the model, the hook enforces
+regardless.

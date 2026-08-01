@@ -1,0 +1,27 @@
+/* gnt.ai brand pass on top of zudoku.config.tsx's theme.light/dark tokens
+   (background/foreground/card/border/etc -- Zudoku's own shadcn-derived
+   variable set, see its Colors & Theme docs). Anything not expressible as
+   one of those named tokens lives here instead of fighting the config's
+   own shape.
+
+   public/fonts.css (the self-hosted IBM Plex Mono + Source Serif 4
+   @font-face rules, same two faces apps/web self-hosts via
+   next/font/google) is already wired in via theme.fonts in
+   zudoku.config.tsx -- not re-imported here, that would just make the
+   browser load the same stylesheet twice. */
+
+/* Headings pick up gnt.ai's serif (apps/web reserves Source Serif 4 for
+   headings only, IBM Plex Mono for body/UI -- see
+   apps/web/app/globals.css's --font-serif/--font-mono split). Zudoku's
+   theme.fonts only exposes one "sans" slot for UI chrome and a "mono" slot
+   for code, no dedicated heading slot, so the serif goes on headings
+   directly here instead. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: "Source Serif 4", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  font-weight: 400;
+}

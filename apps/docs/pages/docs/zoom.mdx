@@ -1,0 +1,50 @@
+---
+title: Zoom
+sidebar_icon: video
+description: Read recording transcripts straight out of Zoom, scoped to hosts and a date range you choose.
+---
+
+`gnt prebrain --mcp-zoom` reads recording transcripts straight out of Zoom, scoped to the hosts and
+date range you choose, through Zoom's own MCP server. No gnt server in the read path.
+
+Needs a paid Zoom Pro plan or higher for every host you scope this to. Zoom's free Basic tier has no
+cloud recording at all, so there's no transcript for this connector to read. Check with whoever owns
+your Zoom account before running this.
+
+## Connect it
+
+Zoom's MCP server authenticates with a user OAuth access token, not a permanent API key. Create a
+Zoom Marketplace "General App" (not Server-to-Server OAuth), complete its authorization once, and
+paste the resulting token into `gnt connect zoom-mcp`, which checks the connection with one real read
+before saving anything. That token is short-lived (about an hour), so you'll reconnect with a fresh
+one periodically rather than once and done.
+
+```text
+$ gnt connect zoom-mcp
+
+✓ Saved. Run `gnt prebrain --mcp-zoom …` to read from it.
+```
+
+## Scope it to hosts and a date range
+
+`--zoom-hosts` takes one or more Zoom host user ids or emails, comma-separated, and is required.
+`--zoom-from` / `--zoom-to` narrow the recordings pulled for each host; leave them off and it reads
+just that day's recordings, never a host's entire history by default.
+
+```text
+$ gnt prebrain --mcp-zoom --zoom-hosts host@acme.com \
+    --zoom-from 2026-07-01 --zoom-to 2026-07-15
+
+Found 18 candidate chunks:
+  Zoom (live MCP): 18 chunks across 6 files
+```
+
+## What it reads, and what it never does
+
+For each recording a scoped host has in range, it reads the verbatim transcript only. It never reads
+whiteboards, Zoom Docs, agenda documents, participant lists, chat search, or any recording belonging
+to a host you didn't name. Those fields and tools are stripped or simply never called, not just left
+unused.
+
+Same as every other prebrain walker: everything above happens on your device before the privacy gate
+runs, and only masked text ever reaches extraction.

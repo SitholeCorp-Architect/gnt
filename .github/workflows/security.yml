@@ -1,0 +1,175 @@
+name: Security
+
+# Dependency + secret scanning, split from CI's lint/typecheck/build/test
+# jobs so a new vulnerability advisory or a leaked credential blocks merge
+# on its own signal, without waiting on or getting lost in the build.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  api-audit:
+    name: api-audit (uv audit)
+    # github-hosted -- see ci.yml's `web` job for why this isn't pinned to
+    # the self-hosted macOS box anymore (was a temporary Actions billing
+    # workaround, confirmed fixed).
+    runs-on: ubuntu-latest
+    # None of these jobs touch a database, 10 min is generous.
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: 0.12.1
+          enable-cache: true
+
+      # --frozen: read uv.lock exactly as committed, never resolve/relock
+      # in CI. No `uv sync` needed first — audit resolves straight off
+      # pyproject.toml + uv.lock, no venv install required.
+      - run: uv audit --frozen
+
+  js-audit:
+    name: js-audit (pnpm audit, bun audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Covers apps/web + apps/cli, the pnpm workspace (pnpm-workspace.yaml).
+      # apps/store is deliberately excluded from it (Bun-native, own
+      # lockfile — see that file's comment) and audited separately below.
+      - run: pnpm install --frozen-lockfile
+      # GHSA-qwww-vcr4-c8h2 (react-router, high) is baselined in this
+      # workspace's own auditConfig.ignoreGhsas (pnpm-workspace.yaml, see
+      # that entry's own comment for the full reasoning) -- pinned inside
+      # apps/docs' zudoku dependency, no fixed version exists to bump to,
+      # and no real attack surface on a static build with no server
+      # runtime. Plain `pnpm audit` here picks that config up automatically
+      # (no --ignore flag needed at the call site), same as it would for
+      # anyone running this locally.
+      - run: pnpm audit
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - run: bun install --frozen-lockfile
+        working-directory: apps/store
+      - run: bun audit
+        working-directory: apps/store
+
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          # Full history, not the default shallow clone — gitleaks scans
+          # git log, and a shallow checkout would only ever expose the tip
+          # commit to it.
+          fetch-depth: 0
+
+      # No hosted gitleaks-action here — it requires a paid license for
+      # org-owned private repos. The scanner itself is MIT-licensed and
+      # free to run directly, so we fetch the pinned release binary and
+      # verify its checksum instead of trusting a third-party action.
+      # Runner-OS-aware (Darwin as well as Linux) so this still works if
+      # this job ever runs on the self-hosted macOS runner again, not just
+      # on the ubuntu-latest it runs on by default -- picks the matching
+      # asset/checksum instead of assuming linux_x64.
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          case "$(uname -s)" in
+            Darwin) asset="gitleaks_8.30.1_darwin_arm64.tar.gz"; sum="b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5" ;;
+            Linux) asset="gitleaks_8.30.1_linux_x64.tar.gz"; sum="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb" ;;
+            *) echo "::error::unsupported runner OS $(uname -s) for gitleaks install" >&2; exit 1 ;;
+          esac
+          curl -sSfLO "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/$asset"
+          echo "$sum  $asset" | shasum -a 256 -c -
+          tar xzf "$asset" -C "$HOME/.local/bin" gitleaks
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Full commit history, not just this PR's diff. .gitleaksignore
+      # baselines the one known non-secret finding (a throwaway CI Fernet
+      # key — see that file for why); anything else gitleaks turns up here
+      # is real and fails the job.
+      - run: gitleaks detect --source . --redact -v
+
+      # bruno/ (the Bruno API collection, repo root) is built to only ever
+      # carry credentials through {{var}} interpolation — real org/mcp/
+      # webhook keys and the store-internal secret live in Bruno env vars
+      # (bruno/environments/*.bru resolve them from process.env at run
+      # time), never as literal strings in a committed .bru file. gitleaks
+      # above already covers this directory with its own generic,
+      # entropy-based rules; this is a second, narrow, shape-specific check
+      # for exactly the credential formats this codebase mints (gnt.ai API
+      # keys, webhook tokens, Stripe secrets, GitHub PATs, Fernet keys) —
+      # cheap, precise, and it fails with a clear message naming which
+      # request leaked a real key instead of a generic gitleaks finding ID.
+      - name: grep bruno/ for literal secret-shaped strings
+        run: |
+          set -euo pipefail
+          if grep -rnE 'gnt_live_[A-Za-z0-9_-]{20,}|whk_[A-Za-z0-9_-]{20,}|sk_(live|test)_[A-Za-z0-9]{16,}|whsec_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|[A-Za-z0-9+/]{32,}={1,2}' \
+            bruno/ 2>/dev/null; then
+            echo "::error::found a real-looking secret in bruno/ — every credential in this collection must go through {{var}} interpolation (see bruno/README.md), never a literal key/token string"
+            exit 1
+          fi
+
+  public-copy-scrub:
+    name: public-copy-scrub (no third-party automation tool names)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      # gnt's public surfaces describe the generic webhook in gnt's own
+      # terms only ("any tool or system that can send an HTTP POST can
+      # feed gnt"), never naming a specific third-party automation
+      # platform. Scoped to the actual public surfaces this repo ships
+      # (public docs, the npm-published CLI README, starter packs that
+      # ship to real customers) rather than the whole repo, since internal
+      # code comments and planning docs are allowed to name these tools
+      # and a full-repo scan would fail on those legitimately. The
+      # marketing site (apps/web) doesn't ship in this repo at all.
+      - name: grep public surfaces for banned automation-tool names
+        run: |
+          set -euo pipefail
+          if grep -rniE 'zapier|n8n|make\.com|pipedream|ifttt' \
+            apps/cli/README.md \
+            apps/cli/src/index.ts \
+            apps/cli/src/commands \
+            apps/cli/src/prebrain/starter-packs; then
+            echo "::error::found a third-party automation-tool name in public-facing copy; describe the webhook in gnt's own terms instead"
+            exit 1
+          fi
+
+  workflow-security:
+    name: workflow-security (fork-PR safety guard)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - run: python3 .github/scripts/check_workflow_security.py

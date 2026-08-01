@@ -1,0 +1,2404 @@
+openapi: 3.1.0
+info:
+  title: AI GNT API
+  version: 0.1.0
+paths:
+  /v1/brain/summary:
+    get:
+      tags:
+      - brain
+      summary: Brain Summary
+      operationId: brain_summary_v1_brain_summary_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/onboarding/status:
+    get:
+      tags:
+      - brain
+      summary: Onboarding Status
+      description: 'This org''s onboarding progress — "how close is this org to a
+        working
+
+        setup" — aggregated off onboarding_events (gnt/onboarding_metrics.py).
+
+        Planned future ROI metering will read off the same table, so counts
+
+        stay a flat event_type -> count map here rather than baking in today''s
+
+        five known types.
+
+
+        connected_cli isn''t an onboarding_event (gnt login has no event-log
+
+        call site, unlike the Slack/GitHub connect routes and rule proposal) —
+
+        it''s read straight off mcp_api_keys instead. A CLI key, once minted,
+
+        always stays a row here even if later revoked, so this answers "has
+
+        this org ever completed gnt login", not "is a CLI key live right now".
+
+        apps/web/components/onboarding-status.tsx polls this for the /welcome
+
+        page''s live step checklist.
+
+
+        reached_five_rules_milestone is this product''s "org reaches N approved
+
+        rules in first session" success metric, N=5 — derived straight off
+
+        the same counts, not a second query,
+
+        since rules_approved already is that lifetime-cumulative count (see
+
+        onboarding_metrics.RULES_APPROVED_MILESTONE for why that''s an
+
+        accurate proxy for "first session" here).'
+      operationId: onboarding_status_v1_onboarding_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/skill-packs/latest.zip:
+    get:
+      tags:
+      - skill-packs
+      summary: Latest Skill Pack
+      operationId: latest_skill_pack_v1_skill_packs_latest_zip_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/whoami:
+    get:
+      tags:
+      - settings
+      summary: Whoami
+      description: 'Lets apps/web''s CLI-facing org routes (app/api/cli/org/*) verify
+        a
+
+        cli-key and learn which org it''s admin-scoped to, without duplicating
+
+        key-hash/expiry/revocation logic over there — that''s already exactly
+
+        what require_admin resolves. No user_id in the response: a cli-key
+
+        carries no real Better Auth identity of its own (see
+
+        OrgContext.user_id''s own comment), so apps/web resolves an acting
+
+        admin from the org''s own member list instead.'
+      operationId: whoami_v1_whoami_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/settings/cli-key:
+    post:
+      tags:
+      - settings
+      summary: Create Cli Key
+      description: 'Mints a personal credential for gnt login — deliberately separate
+
+        from create_mcp_key below. This is the ONLY path that ever sets
+
+        is_admin=True on a key, and require_session (wrapped inside
+
+        enforce_cli_key_rate_limit) means it can only be called with a live
+
+        session, never an existing API key, closing the self-escalation path
+
+        (an API key minting another, more capable, API key). The rate limit
+
+        on top of that is a separate backstop: a live session, compromised or
+
+        scripted, shouldn''t be able to mint unlimited admin-snapshotting keys.
+
+        The key this returns still isn''t meant to be handed to an agent — it
+
+        carries the minting human''s own admin status. Also stamps a default
+
+        expires_at (cli_key_default_ttl_days, 90 days) — a live human logs
+
+        back in well within that window, so this bounds
+
+        how long a laptop-left-somewhere credential stays valid without
+
+        anyone needing to remember to revoke it by hand.'
+      operationId: create_cli_key_v1_settings_cli_key_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/CreateKeyRequest'
+              - type: 'null'
+              title: Body
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /v1/settings/cli-key/poll:
+    get:
+      tags:
+      - settings
+      summary: Poll Cli Key
+      description: 'Deliberately unauthenticated -- the CLI has no session or key
+        yet at
+
+        this point, that''s the entire reason this endpoint exists. Security
+
+        here rests on login_id''s own unguessability (a random UUID minted
+
+        fresh per `gnt login` run, ~120 bits of entropy) plus one-time
+
+        consumption and a short TTL, same trust model RFC 8628''s device
+
+        authorization grant relies on -- and no weaker than what this replaced
+
+        (a random ephemeral port on localhost was the previous flow''s only
+
+        protection). That flow POSTed the key straight to a plain HTTP server
+
+        gnt login ran on 127.0.0.1: Chrome''s Local Network Access policy now
+
+        requires an explicit permission grant before a public https page can
+
+        even reach a loopback address, which broke that delivery outright and
+
+        isn''t something a response header can opt back into. Polling this
+
+        instead sidesteps browser loopback access entirely.'
+      operationId: poll_cli_key_v1_settings_cli_key_poll_get
+      parameters:
+      - name: login_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Login Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/settings/mcp-keys:
+    get:
+      tags:
+      - settings
+      summary: List Mcp Keys
+      operationId: list_mcp_keys_v1_settings_mcp_keys_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+    post:
+      tags:
+      - settings
+      summary: Create Mcp Key
+      description: 'No default expires_at, unlike create_cli_key above — that default
+
+        TTL is scoped specifically to CLI keys. An
+
+        MCP key is handed to an agent and left running unattended for however
+
+        long that integration is meant to live; there''s no human login cadence
+
+        to bound it against the way a CLI key has one, and a silent expiry
+
+        would just be a surprise outage for whatever''s calling the MCP server.
+
+        Revocation (already shipped) is the intended way to kill one of these
+
+        early; expires_at just stays null here.'
+      operationId: create_mcp_key_v1_settings_mcp_keys_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/CreateKeyRequest'
+              - type: 'null'
+              title: Body
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /v1/settings/mcp-keys/{key_id}/revoke:
+    post:
+      tags:
+      - settings
+      summary: Revoke Mcp Key
+      operationId: revoke_mcp_key_v1_settings_mcp_keys__key_id__revoke_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: key_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Key Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/settings/mcp-keys/{key_id}/rotate:
+    post:
+      tags:
+      - settings
+      summary: Rotate Mcp Key
+      description: 'Mirrors rotate_cli_key, scoped to key_type == "mcp". Rate limited
+
+        the same as create_mcp_key (rotation mints a new row, same abuse
+
+        surface as minting outright) -- picked up in a rebase onto main after
+
+        a sibling change added that limit after this branch had already
+
+        forked from it; wired in here to close the gap rather than ship this
+
+        PR without it. enforce_mcp_key_
+
+        rate_limit wraps get_current_org, still the right AUTH gate on its
+
+        own (not require_session, matching create_mcp_key and revoke_mcp_key
+
+        above): an MCP key is never admin-capable regardless of who mints or
+
+        rotates it, so there''s no self-escalation path to close the way
+
+        rotate_cli_key has to close one. No default expires_at on the
+
+        replacement either, for the same reason create_mcp_key leaves it
+
+        null.'
+      operationId: rotate_mcp_key_v1_settings_mcp_keys__key_id__rotate_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: key_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Key Id
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/settings/cli-keys:
+    get:
+      tags:
+      - settings
+      summary: List Cli Keys
+      description: 'Mirrors list_mcp_keys, scoped to key_type == "cli" — lets an org
+        see
+
+        every personal CLI login credential minted under it (org.org_id filter
+
+        is the only tenant boundary here: mcp_api_keys has no RLS policy of
+
+        its own, see migration 0007''s docstring, since resolving a bearer
+
+        token to an org has to happen before the org is known).'
+      operationId: list_cli_keys_v1_settings_cli_keys_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/settings/cli-keys/{key_id}/revoke:
+    post:
+      tags:
+      - settings
+      summary: Revoke Cli Key
+      description: 'Mirrors revoke_mcp_key exactly, scoped to key_type == "cli". Used
+        by
+
+        the settings UI/founder tooling to kill a specific CLI credential, and
+
+        by `gnt logout` (with the key''s own id, handed back at mint time and
+
+        saved locally) to revoke itself server-side on the way out. Deliberately
+
+        get_current_org, not require_session: revoking an existing key never
+
+        mints anything new, so there''s no self-escalation path to close the
+
+        way create_cli_key has to close one — and `gnt logout` only ever has
+
+        the plaintext key itself to authenticate with, never a live session.'
+      operationId: revoke_cli_key_v1_settings_cli_keys__key_id__revoke_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: key_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Key Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/settings/cli-keys/{key_id}/rotate:
+    post:
+      tags:
+      - settings
+      summary: Rotate Cli Key
+      description: 'Mints a replacement CLI key, THEN revokes the
+
+        one being rotated — in that order, so a failure between the two steps
+
+        (e.g. the commit below never lands) leaves the caller with two valid
+
+        keys rather than revoke-then-fail-to-create, which would lock them
+
+        out. The new key inherits the old row''s name/is_admin, and gets a
+
+        fresh 90-day expires_at exactly like a brand new create_cli_key call.
+
+
+        Gated the same way create_cli_key is (enforce_cli_key_rate_limit,
+
+        which wraps require_session), not get_current_org like revoke_cli_key
+
+        above — rotation mints a NEW key carrying the OLD row''s is_admin
+
+        snapshot, so this is a mint, not a revoke, and has the same
+
+        self-escalation path require_session exists to close: an API key
+
+        (even a non-admin one) must not be able to rotate an admin-capable
+
+        CLI key in the same org into a plaintext it could then read.'
+      operationId: rotate_cli_key_v1_settings_cli_keys__key_id__rotate_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: key_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Key Id
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/settings/webhook-tokens:
+    get:
+      tags:
+      - settings
+      summary: List Webhook Tokens
+      operationId: list_webhook_tokens_v1_settings_webhook_tokens_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+    post:
+      tags:
+      - settings
+      summary: Create Webhook Token
+      description: 'Mints the credential a Zapier/monday/HubSpot
+
+        webhook config posts to routers/webhooks.py''s ingest endpoint with.
+
+        require_admin (not require_session like create_cli_key): this token
+
+        can only ever create draft rules, nothing McpApiKey-authenticated
+
+        callers can''t already do, so there''s no privilege-escalation path to
+
+        close the way an admin-snapshotting CLI key mint has to close one —
+
+        an existing API key with admin standing is fine minting one of these.'
+      operationId: create_webhook_token_v1_settings_webhook_tokens_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/CreateKeyRequest'
+              - type: 'null'
+              title: Body
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /v1/settings/webhook-tokens/{token_id}/revoke:
+    post:
+      tags:
+      - settings
+      summary: Revoke Webhook Token
+      operationId: revoke_webhook_token_v1_settings_webhook_tokens__token_id__revoke_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: token_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Token Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/rules:
+    post:
+      tags:
+      - rules
+      summary: Create Rule
+      operationId: create_rule_v1_rules_post
+      security:
+      - HTTPBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRuleRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - rules
+      summary: List Rules
+      operationId: list_rules_v1_rules_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/rules/staleness/due:
+    get:
+      tags:
+      - rules
+      summary: Get Rules Due For Revalidation
+      description: 'Approved rules this org''s last nightly compute_rule_staleness
+        run
+
+        flagged as past the staleness threshold — due for a human to confirm
+
+        still true, or open a deprecation/refresh PR. Backs `gnt stale`.
+
+
+        A stopgap, not the final home for this: the eventual plan is to
+
+        surface this prompt in a weekly digest email, which doesn''t exist
+
+        yet — it''s waiting on that digest itself and on the nightly
+
+        contradiction-sweep worker (workers/tasks_contradictions.py), which
+
+        also needs to land first. This list is the same underlying signal,
+
+        surfaced as CLI visibility instead — wire it into the digest once
+
+        that email exists rather than building a second parallel version of
+
+        it.
+
+
+        Registered before /{rule_id} in this file, but doesn''t actually need
+
+        to be — "staleness"/"due" are two path segments, "{rule_id}" matches
+
+        exactly one, so there''s no route collision to order around.'
+      operationId: get_rules_due_for_revalidation_v1_rules_staleness_due_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/rules/{rule_id}:
+    get:
+      tags:
+      - rules
+      summary: Get Rule
+      operationId: get_rule_v1_rules__rule_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: rule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rule Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/rules/{rule_id}/submit:
+    post:
+      tags:
+      - rules
+      summary: Submit Rule
+      operationId: submit_rule_v1_rules__rule_id__submit_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: rule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rule Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/rules/{rule_id}/propose:
+    post:
+      tags:
+      - rules
+      summary: Propose Rule
+      description: 'Renders the rule to markdown and opens a PR against the org''s
+
+        connected repo. This is `approve`''s replacement — approval now means a
+
+        human merging that PR on GitHub, not an in-terminal keypress (see
+
+        docs/migration/RECONCILE_V2.md). The actual approved-status transition,
+
+        including the HMAC-signed write and the previous-version supersede
+
+        dance approve_rule used to do here, happens in the webhook handler
+
+        once a real merge is confirmed — this endpoint only ever writes
+
+        `pending_merge`, never `approved`, so none of that machinery belongs
+
+        in this function anymore.'
+      operationId: propose_rule_v1_rules__rule_id__propose_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: rule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rule Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/rules/batch-propose:
+    post:
+      tags:
+      - rules
+      summary: Batch Propose Rules
+      description: 'propose_rule''s batched sibling — one branch, one
+
+        put_file per rule, ONE pull request for the whole batch, and every
+
+        rule in it moves to pending_merge together carrying the SAME
+
+        prNumber/prUrl. Built for `gnt prebrain`''s draft-rule output (5-8
+
+        related rules reviewed as one PR), but not restricted to that caller.
+
+
+        Validation fails the WHOLE batch with a clear error naming the
+
+        offending rule(s) rather than silently skipping or partially
+
+        processing — a batch is one reviewable unit; a caller that asked for
+
+        5 rules and silently got 3 proposed has no way to know that happened
+
+        short of diffing IDs itself. Nothing GitHub-side happens until every
+
+        rule in the batch has already passed validation.'
+      operationId: batch_propose_rules_v1_rules_batch_propose_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchProposeRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /v1/rules/{rule_id}/reject:
+    post:
+      tags:
+      - rules
+      summary: Reject Rule
+      operationId: reject_rule_v1_rules__rule_id__reject_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: rule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rule Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectRuleRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/rules/{rule_id}/deprecate:
+    post:
+      tags:
+      - rules
+      summary: Deprecate Rule
+      operationId: deprecate_rule_v1_rules__rule_id__deprecate_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: rule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rule Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/rules/{rule_id}/edit:
+    post:
+      tags:
+      - rules
+      summary: Edit Rule
+      description: 'Creates a new draft version of an approved rule. The old rule
+        stays
+
+        exactly as-is (still approved, still served) until the new version
+
+        is itself approved — see approve_rule''s supersede step.'
+      operationId: edit_rule_v1_rules__rule_id__edit_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: rule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rule Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRuleRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/transcribe:
+    post:
+      tags:
+      - transcribe
+      summary: Transcribe
+      operationId: transcribe_v1_transcribe_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_transcribe_v1_transcribe_post'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /v1/slack/install-url:
+    get:
+      tags:
+      - slack
+      summary: Install Url
+      operationId: install_url_v1_slack_install_url_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: origin
+        in: query
+        required: false
+        schema:
+          type: string
+          default: web
+          title: Origin
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/slack/oauth/callback:
+    get:
+      tags:
+      - slack
+      summary: Oauth Callback
+      operationId: oauth_callback_v1_slack_oauth_callback_get
+      parameters:
+      - name: code
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Code
+      - name: state
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: State
+      - name: error
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/slack/command:
+    post:
+      tags:
+      - slack
+      summary: Slash Command
+      description: '`/brain <what you want to capture>` — retargeted at proposing
+        rules,
+
+        replacing the retired knowledge-unit capture pipeline (triage/extract/
+
+        embed) it used to feed. `text` is freeform;
+
+        see _split_command_text above for how it becomes a title/body pair.
+
+        The rest goes through create_draft_rule, the exact same function
+
+        POST /v1/rules and routers/webhooks.py''s ingest_webhook already share
+
+        — same sanitize/tenant-scoping/draft-ceiling behavior as every other
+
+        draft-rule front door, just reached through a slash command instead.
+
+
+        Bare `/brain`, `/brain help`, and `/brain status` are the three
+
+        read-only, zero-write exits from this handler — matched against the
+
+        whole trimmed `text` up front, before anything below touches
+
+        create_draft_rule. No new Slack app manifest entry: this reuses the
+
+        same `/brain` command and slash-command endpoint rather than
+
+        registering a second one, since `/brain` had no subcommand-style
+
+        parsing to preserve compatibility with. `status` exists so a human
+
+        (or someone verifying the integration works at all) has a way to
+
+        check "is this workspace actually linked to an org" without
+
+        polluting real data by ingesting a throwaway policy just to find out.
+
+
+        apply_privacy_gate=True below is not optional: a
+
+        Slack message is exactly the ambient third-party content the gate
+
+        exists for — someone''s words in a channel, not a human deliberately
+
+        typing straight into gnt — see gnt.pipeline.privacy_gate''s module
+
+        docstring and create_draft_rule''s own docstring for the full
+
+        reasoning, including the masking-is-permanent tradeoff.
+
+
+        No Slack-specific rate limit added on top of the shared
+
+        max_draft_rules_per_org ceiling create_draft_rule already enforces.
+
+        Deliberate, not an oversight: routers/webhooks.py''s per-IP/per-org
+
+        limits exist because a webhook ingest token is a leakable bearer
+
+        credential (anyone who obtains the URL can call it indefinitely, with
+
+        nothing else identifying them), and its per-IP limit specifically
+
+        protects the token-lookup DB hit against a flood of requests carrying
+
+        invalid tokens. Neither threat model applies here: this endpoint is
+
+        only ever reachable through Slack''s own signed request (verified
+
+        below, before any DB work runs), the caller-identifying signal is
+
+        Slack''s servers relaying a real signed request rather than any one
+
+        IP, and firing this command still requires being a real member of a
+
+        workspace that installed the app, typing it into Slack''s own UI — a
+
+        materially higher-friction, more accountable path than POSTing a
+
+        bare URL. The shared draft-rule ceiling is the real backstop for a
+
+        compromised or malicious workspace member spamming `/brain`, same as
+
+        it already is for every other draft-rule front door.'
+      operationId: slash_command_v1_slack_command_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /v1/settings/github:
+    get:
+      tags:
+      - github
+      summary: Get Github Connection
+      operationId: get_github_connection_v1_settings_github_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+    post:
+      tags:
+      - github
+      summary: Connect Github
+      operationId: connect_github_v1_settings_github_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectGithubRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+    delete:
+      tags:
+      - github
+      summary: Disconnect Github
+      operationId: disconnect_github_v1_settings_github_delete
+      responses:
+        '204':
+          description: Successful Response
+      security:
+      - HTTPBearer: []
+  /v1/settings/github/app/install-url:
+    get:
+      tags:
+      - github
+      summary: Github App Install Url
+      description: 'Starts the GitHub App install flow — mints a signed state token
+
+        binding this install to org.org_id (see app_auth.verify_install_state
+
+        for why the callback trusts this instead of whatever org happens to be
+
+        active in the browser that completes it) and points at the App''s own
+
+        install URL, fetched live rather than a hardcoded slug.'
+      operationId: github_app_install_url_v1_settings_github_app_install_url_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: origin
+        in: query
+        required: false
+        schema:
+          type: string
+          default: web
+          title: Origin
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/settings/github/app/callback:
+    get:
+      tags:
+      - github
+      summary: Github App Callback
+      description: 'Called server-to-server by apps/web''s `/api/github/callback`
+        route
+
+        (the URL actually registered in the App''s settings — GitHub redirects
+
+        the browser there, not here) once GitHub redirects back with a real
+
+        installation_id. Every genuine install this app itself started carries
+
+        `state` (see install-url above) — that signature IS the auth for this
+
+        endpoint, there''s no session/API-key check here at all, same trust
+
+        model as gnt/slack/oauth.py''s own oauth_callback. `setup_action` values
+
+        other than "install" (a pending "request" awaiting an org owner''s
+
+        approval, or a repo-selection "update" from GitHub''s own installation
+
+        settings page, which doesn''t carry state at all) aren''t handled here —
+
+        out of scope for this connect flow; re-running `gnt connect github`
+
+        covers the update case in practice.'
+      operationId: github_app_callback_v1_settings_github_app_callback_get
+      parameters:
+      - name: installation_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Installation Id
+      - name: setup_action
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Setup Action
+      - name: state
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: State
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/github/webhook:
+    post:
+      tags:
+      - github-webhook
+      summary: Github Webhook
+      operationId: github_webhook_v1_github_webhook_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /v1/billing/status:
+    get:
+      tags:
+      - billing
+      summary: Billing Status
+      operationId: billing_status_v1_billing_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingStatus'
+      security:
+      - HTTPBearer: []
+  /v1/billing/payment-method:
+    get:
+      tags:
+      - billing
+      summary: Payment Method
+      operationId: payment_method_v1_billing_payment_method_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                anyOf:
+                - $ref: '#/components/schemas/PaymentMethodInfo'
+                - type: 'null'
+                title: Response Payment Method V1 Billing Payment Method Get
+      security:
+      - HTTPBearer: []
+  /v1/billing/invoices:
+    get:
+      tags:
+      - billing
+      summary: Invoices
+      operationId: invoices_v1_billing_invoices_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/InvoiceInfo'
+                type: array
+                title: Response Invoices V1 Billing Invoices Get
+      security:
+      - HTTPBearer: []
+  /v1/billing/checkout:
+    post:
+      tags:
+      - billing
+      summary: Checkout
+      operationId: checkout_v1_billing_checkout_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutRequest'
+              default:
+                tier: base
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /v1/billing/portal:
+    post:
+      tags:
+      - billing
+      summary: Portal
+      operationId: portal_v1_billing_portal_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortalResponse'
+      security:
+      - HTTPBearer: []
+  /v1/billing/cancel:
+    post:
+      tags:
+      - billing
+      summary: Cancel
+      description: 'In-app cancel -- the whole point is not sending the customer to
+
+        Stripe''s portal for this. Schedules cancellation at period end (see
+
+        cancel_subscription''s own docstring) and confirms by email right
+
+        away, synchronously, rather than waiting on the webhook that also
+
+        syncs this same state for cancellations started elsewhere.'
+      operationId: cancel_v1_billing_cancel_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelResponse'
+      security:
+      - HTTPBearer: []
+  /v1/billing/webhook:
+    post:
+      tags:
+      - billing
+      summary: Webhook
+      operationId: webhook_v1_billing_webhook_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /v1/gaps:
+    get:
+      tags:
+      - gaps
+      summary: Get Gaps
+      description: 'This org''s top uncovered queries — search_rules calls that came
+        back
+
+        empty, and check_action calls that escalated to needs_human specifically
+
+        because no rule covers the action (see gap_tracking.py). Backs `gnt gaps`.'
+      operationId: get_gaps_v1_gaps_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/roi/summary:
+    get:
+      tags:
+      - roi
+      summary: Get Roi Summary
+      description: 'This org''s ROI numbers (rules served, actions checked,
+
+        blocked/needs_human counts, gap count, coverage growth) — the metrics
+
+        that make the case gnt is worth keeping installed, the same
+
+        aggregation workers/tasks_digest.py''s weekly email sends
+
+        (gnt.roi_summary.build_roi_summary), surfaced here for `gnt status` —
+
+        see that CLI command for how this renders. Current 7-day window vs.
+
+        the 7 days before it, so a customer sees the number AND whether it''s
+
+        moving, not just a point-in-time total.'
+      operationId: get_roi_summary_v1_roi_summary_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/webhooks/ingest/{token}:
+    post:
+      tags:
+      - webhooks
+      summary: Ingest Webhook
+      description: 'Turns a POST from Zapier (or anything else that can send a JSON
+
+        webhook — monday.com and HubSpot both go through a Zapier "Webhooks by
+
+        Zapier" step in the published recipe, see docs) into a draft rule,
+
+        exactly as if a human had called POST /v1/rules by hand. Sanitize,
+
+        tenant scoping, and the draft-rule shape are shared with that endpoint
+
+        via create_draft_rule — this only adds a different front door onto it.
+
+
+        The per-IP rate limit (enforce_webhook_ingest_ip_rate_limit) runs as a
+
+        route-level dependency, ahead of everything below, specifically so a
+
+        flood of requests with invalid/guessed tokens gets throttled before
+
+        spending a token-hash lookup or a DB round trip on each one — same
+
+        reasoning as checking it before, not after, resolving the token.'
+      operationId: ingest_webhook_v1_webhooks_ingest__token__post
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRuleRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/org/offboarding/request:
+    post:
+      tags:
+      - org-admin
+      summary: Request Offboarding
+      description: 'Step 1 of 2. Produces the full export (rules with audit history,
+
+        gaps, staleness, calibration/contradiction findings, ROI counters,
+
+        onboarding events, key/connection metadata — never secrets) and mints
+
+        a confirmation token scoped to this org. Calling this again before
+
+        confirming just re-exports and overwrites the previous token (the old
+
+        one stops working) — there is deliberately no limit on how many times
+
+        an admin can re-request before actually confirming.'
+      operationId: request_offboarding_v1_org_offboarding_request_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/org/offboarding/confirm:
+    post:
+      tags:
+      - org-admin
+      summary: Confirm Offboarding
+      description: 'Step 2 of 2 — irreversible. Requires the exact token /request
+        just
+
+        issued for THIS org (never another org''s — the key is org-scoped, so a
+
+        caller can never hold a valid token for anyone but their own org),
+
+        unexpired, unused. Deletes apps/store''s rules mirror first (the more
+
+        likely-to-fail-partway network call), then every org-scoped Postgres
+
+        row — see gnt.org_offboarding.delete_org_postgres_data for the full,
+
+        authoritative table list.'
+      operationId: confirm_offboarding_v1_org_offboarding_confirm_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmOffboardingRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /v1/platform-admin/orgs:
+    get:
+      tags:
+      - platform-admin
+      summary: List Orgs
+      description: 'Every org on the platform, with plan/billing state, this month''s
+
+        check_action usage vs. its plan cap, and this month''s LLM spend.'
+      operationId: list_orgs_v1_platform_admin_orgs_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/platform-admin/orgs/{org_id}:
+    get:
+      tags:
+      - platform-admin
+      summary: Get Org Detail
+      operationId: get_org_detail_v1_platform_admin_orgs__org_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Org Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/platform-admin/orgs/{org_id}/plan-tier:
+    post:
+      tags:
+      - platform-admin
+      summary: Set Plan Tier
+      description: 'The one write gnt_admin can make -- see migration 0035. Column-
+
+        scoped at the database level (plan_tier, subscription_status only);
+
+        this endpoint only ever sets plan_tier, subscription_status is left
+
+        alone here (that''s a real Stripe-driven field, not a support toggle).'
+      operationId: set_plan_tier_v1_platform_admin_orgs__org_id__plan_tier_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Org Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanTierUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/settings/zendesk:
+    get:
+      tags:
+      - zendesk
+      summary: Get Zendesk Connection
+      operationId: get_zendesk_connection_v1_settings_zendesk_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+    post:
+      tags:
+      - zendesk
+      summary: Connect Zendesk
+      description: 'Live-validates the subdomain/email/token triple with one real
+        read
+
+        (verify_credentials) before anything is persisted -- same discipline
+
+        routers/github.py''s connect_github applies to a PAT via
+
+        verify_repo_access, so a typo''d subdomain or a revoked token fails
+
+        immediately with a clear error instead of silently saving a connection
+
+        the nightly sync will only discover is broken hours later.'
+      operationId: connect_zendesk_v1_settings_zendesk_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectZendeskRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+    delete:
+      tags:
+      - zendesk
+      summary: Disconnect Zendesk
+      operationId: disconnect_zendesk_v1_settings_zendesk_delete
+      responses:
+        '204':
+          description: Successful Response
+      security:
+      - HTTPBearer: []
+  /v1/settings/zendesk/sync-status:
+    get:
+      tags:
+      - zendesk
+      summary: Zendesk Sync Status
+      description: 'Sync-status health surface -- last
+
+        successful sync, last error, and this run''s item/candidate counts.
+
+        `gnt status` shows connector health for CLI-local connectors already;
+
+        this is the server-side equivalent''s own surface, a plain GET a future
+
+        `gnt status` addition or the web dashboard can poll rather than
+
+        anything pushed. Returns the same "never synced yet" zero-value shape
+
+        regardless of whether Zendesk is even connected -- callers that care
+
+        should check GET /v1/settings/zendesk''s `connected` field first.'
+      operationId: zendesk_sync_status_v1_settings_zendesk_sync_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/settings/intercom:
+    get:
+      tags:
+      - intercom
+      summary: Get Intercom Connection
+      operationId: get_intercom_connection_v1_settings_intercom_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+    post:
+      tags:
+      - intercom
+      summary: Connect Intercom
+      description: 'Live-validates the access token with one real read
+
+        (verify_credentials) before anything is persisted -- same discipline
+
+        routers/zendesk.py''s connect_zendesk applies to its own token via
+
+        verify_credentials, so a typo''d or revoked token fails immediately
+
+        with a clear error instead of silently saving a connection the
+
+        nightly sync will only discover is broken hours later. Unlike
+
+        connect_zendesk, there''s no subdomain/agent_email to collect --
+
+        Intercom''s access token alone identifies the workspace (see
+
+        gnt/intercom/client.py''s module docstring).'
+      operationId: connect_intercom_v1_settings_intercom_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectIntercomRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+    delete:
+      tags:
+      - intercom
+      summary: Disconnect Intercom
+      operationId: disconnect_intercom_v1_settings_intercom_delete
+      responses:
+        '204':
+          description: Successful Response
+      security:
+      - HTTPBearer: []
+  /v1/settings/intercom/sync-status:
+    get:
+      tags:
+      - intercom
+      summary: Intercom Sync Status
+      description: 'Sync-status health surface -- last
+
+        successful sync, last error, and this run''s item/candidate counts.
+
+        Same role as routers/zendesk.py''s own /sync-status endpoint -- a
+
+        plain GET a future `gnt status` addition or the web dashboard can
+
+        poll rather than anything pushed. Returns the same "never synced yet"
+
+        zero-value shape regardless of whether Intercom is even connected --
+
+        callers that care should check GET /v1/settings/intercom''s
+
+        `connected` field first.'
+      operationId: intercom_sync_status_v1_settings_intercom_sync_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/notion/install-url:
+    get:
+      tags:
+      - notion
+      summary: Install Url
+      operationId: install_url_v1_notion_install_url_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/notion/oauth/callback:
+    get:
+      tags:
+      - notion
+      summary: Oauth Callback
+      operationId: oauth_callback_v1_notion_oauth_callback_get
+      parameters:
+      - name: code
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Code
+      - name: state
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: State
+      - name: error
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/notion/status:
+    get:
+      tags:
+      - notion
+      summary: Status
+      operationId: status_v1_notion_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/notion/token:
+    get:
+      tags:
+      - notion
+      summary: Token
+      description: 'The CLI-facing half of this connector: `gnt prebrain --mcp-notion`
+
+        fetches its own org''s token from here (same Bearer-API-key auth every
+
+        other CLI-to-API call already uses, see apps/cli/src/credentials.ts)
+
+        instead of a customer pasting one — the CLI still does the actual
+
+        read/parse/chunk/privacy-gate work locally with whatever token comes
+
+        back, unchanged from before this connector existed.'
+      operationId: token_v1_notion_token_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/linear/install-url:
+    get:
+      tags:
+      - linear
+      summary: Install Url
+      operationId: install_url_v1_linear_install_url_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/linear/oauth/callback:
+    get:
+      tags:
+      - linear
+      summary: Oauth Callback
+      operationId: oauth_callback_v1_linear_oauth_callback_get
+      parameters:
+      - name: code
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Code
+      - name: state
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: State
+      - name: error
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/linear/status:
+    get:
+      tags:
+      - linear
+      summary: Status
+      operationId: status_v1_linear_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /v1/linear/token:
+    get:
+      tags:
+      - linear
+      summary: Token
+      description: 'See routers/notion.py''s own token endpoint docstring — identical
+
+        CLI-fetches-its-own-org''s-token shape, used by
+
+        apps/cli/src/prebrain/mcp-linear.ts.'
+      operationId: token_v1_linear_token_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /healthz:
+    get:
+      summary: Healthz
+      operationId: healthz_healthz_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+components:
+  schemas:
+    BatchProposeRequest:
+      properties:
+        rule_ids:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          title: Rule Ids
+      type: object
+      required:
+      - rule_ids
+      title: BatchProposeRequest
+      description: 'Batches several already-in_review rules into ONE
+
+        PR instead of propose_rule''s one-PR-per-rule. A deliberate design
+
+        choice (not "fake" batching via pacing individual propose_rule calls): the
+
+        customer reviews 5-8 related rules as a single PR, not 5-8 separate
+
+        ones.'
+    BillingStatus:
+      properties:
+        entitled:
+          type: boolean
+          title: Entitled
+        subscription_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Subscription Status
+        trial_ends_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trial Ends At
+        plan_tier:
+          type: string
+          title: Plan Tier
+        monthly_actions_used:
+          type: integer
+          title: Monthly Actions Used
+        monthly_actions_cap:
+          type: integer
+          title: Monthly Actions Cap
+        cancel_at_period_end:
+          type: boolean
+          title: Cancel At Period End
+        current_period_end:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Current Period End
+      type: object
+      required:
+      - entitled
+      - subscription_status
+      - trial_ends_at
+      - plan_tier
+      - monthly_actions_used
+      - monthly_actions_cap
+      - cancel_at_period_end
+      - current_period_end
+      title: BillingStatus
+    Body_transcribe_v1_transcribe_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_transcribe_v1_transcribe_post
+    CancelResponse:
+      properties:
+        cancel_at:
+          type: string
+          title: Cancel At
+      type: object
+      required:
+      - cancel_at
+      title: CancelResponse
+    CheckoutRequest:
+      properties:
+        tier:
+          type: string
+          enum:
+          - base
+          - pro
+          title: Tier
+          default: base
+      type: object
+      title: CheckoutRequest
+    CheckoutResponse:
+      properties:
+        url:
+          type: string
+          title: Url
+      type: object
+      required:
+      - url
+      title: CheckoutResponse
+    ConfirmOffboardingRequest:
+      properties:
+        confirmation_token:
+          type: string
+          minLength: 1
+          title: Confirmation Token
+      type: object
+      required:
+      - confirmation_token
+      title: ConfirmOffboardingRequest
+    ConnectGithubRequest:
+      properties:
+        repo_url:
+          type: string
+          title: Repo Url
+        pat:
+          type: string
+          format: password
+          title: Pat
+          writeOnly: true
+      type: object
+      required:
+      - repo_url
+      - pat
+      title: ConnectGithubRequest
+    ConnectIntercomRequest:
+      properties:
+        access_token:
+          type: string
+          format: password
+          title: Access Token
+          writeOnly: true
+      type: object
+      required:
+      - access_token
+      title: ConnectIntercomRequest
+    ConnectZendeskRequest:
+      properties:
+        subdomain:
+          type: string
+          title: Subdomain
+        agent_email:
+          type: string
+          title: Agent Email
+        api_token:
+          type: string
+          format: password
+          title: Api Token
+          writeOnly: true
+      type: object
+      required:
+      - subdomain
+      - agent_email
+      - api_token
+      title: ConnectZendeskRequest
+    CreateKeyRequest:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        login_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Login Id
+      type: object
+      title: CreateKeyRequest
+    CreateRuleRequest:
+      properties:
+        title:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Title
+        body:
+          type: string
+          maxLength: 8000
+          minLength: 1
+          title: Body
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          default: 0.7
+        source_citations:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Source Citations
+        source:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+          title: Source
+        tags:
+          items:
+            type: string
+          type: array
+          maxItems: 20
+          title: Tags
+      type: object
+      required:
+      - title
+      - body
+      title: CreateRuleRequest
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    InvoiceInfo:
+      properties:
+        id:
+          type: string
+          title: Id
+        number:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Number
+        created:
+          type: string
+          title: Created
+        status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+        amount_paid:
+          type: integer
+          title: Amount Paid
+        currency:
+          type: string
+          title: Currency
+        hosted_invoice_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Hosted Invoice Url
+        invoice_pdf:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Invoice Pdf
+      type: object
+      required:
+      - id
+      - number
+      - created
+      - status
+      - amount_paid
+      - currency
+      - hosted_invoice_url
+      - invoice_pdf
+      title: InvoiceInfo
+    PaymentMethodInfo:
+      properties:
+        brand:
+          type: string
+          title: Brand
+        last4:
+          type: string
+          title: Last4
+        exp_month:
+          type: integer
+          title: Exp Month
+        exp_year:
+          type: integer
+          title: Exp Year
+      type: object
+      required:
+      - brand
+      - last4
+      - exp_month
+      - exp_year
+      title: PaymentMethodInfo
+    PlanTierUpdate:
+      properties:
+        plan_tier:
+          type: string
+          title: Plan Tier
+      type: object
+      required:
+      - plan_tier
+      title: PlanTierUpdate
+    PortalResponse:
+      properties:
+        url:
+          type: string
+          title: Url
+      type: object
+      required:
+      - url
+      title: PortalResponse
+    RejectRuleRequest:
+      properties:
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      type: object
+      title: RejectRuleRequest
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+  securitySchemes:
+    HTTPBearer:
+      type: http
+      scheme: bearer
+servers:
+- url: https://api.gntai.dev
+  description: Production

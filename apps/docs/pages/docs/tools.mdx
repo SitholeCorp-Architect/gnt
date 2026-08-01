@@ -1,0 +1,97 @@
+---
+title: Tools reference
+sidebar_icon: wrench
+description: The 5 MCP tools gnt-brain exposes to any connected agent.
+---
+
+`check_action` leads. It's the differentiator: every other tool lets an agent look policy up, this
+one intercepts an action before the agent takes it. `search_rules`/`get_rule` are the human-approved
+retrieval surface it's built on (status == "approved" only, git-native, PR-merged); the last two
+compile those same rules into downloadable `SKILL.md` files (what `gnt pull` fetches).
+
+## check_action
+
+```text
+check_action(description: str, context: str | None = None) -> dict
+```
+
+Check a described action against your org's approved rules BEFORE the agent takes it. Returns a
+verdict (`allowed`, `blocked`, or `needs_human`) with the governing rule(s) cited and a one-line
+reason. Conservative by design: no covering rule, a retrieval failure, or an unclear call all return
+`needs_human`, never a guessed `allowed` or `blocked`.
+
+```text
+$ check_action("refund order #8021, placed 90 days ago")
+
+{"verdict": "blocked",
+  "reason": "Refunds are store-credit only after 30 days",
+  "cited_rules": [{"id": "8f2c…", "title": "Refund window"}],
+  "rules_retrieved": 3}
+```
+
+## search_rules
+
+```text
+search_rules(query: str, tags: list[str] | None = None, limit: int = 10) -> list[dict]
+```
+
+Semantic search over this org's approved rules. Only rules with `status == "approved"` are ever
+returned; draft, in-review, rejected, and deprecated rules never reach this tool. Each hit includes a
+provenance footer (who approved it, when, and its source citations).
+
+```text
+$ search_rules("refund window", tags=["refunds"])
+
+[{"id": "8f2c…", "title": "Refund window",
+  "body": "Store credit issued for orders 30+ days old",
+  "similarity": 0.87,
+  "provenance": {"approved_by": "admin_x", "sources": […]}}]
+```
+
+## get_rule
+
+```text
+get_rule(rule_id: str) -> dict
+```
+
+Fetch a single approved rule by id, scoped to this org. Refuses (returns an error, not another org's
+data) for cross-tenant ids and for anything not in `status == "approved"`.
+
+```text
+$ get_rule("8f2c1a90-…")
+
+{"id": "8f2c…", "title": "Refund window",
+  "body": "Store credit issued for orders 30+ days old",
+  "tags": ["refunds", "policy"], "confidence": 0.92}
+```
+
+## list_skill_packs
+
+```text
+list_skill_packs() -> list[dict]
+```
+
+List this org's compiled skill packs, newest first, with each one's id, version, and creation time.
+
+```text
+$ list_skill_packs()
+
+[{"id": "a91f2c3d-…", "version": 14,
+  "created_at": "2026-07-10T09:03:00Z"}]
+```
+
+## get_skill_pack
+
+```text
+get_skill_pack(pack_id: str) -> dict
+```
+
+Fetch a compiled skill pack's manifest and file list by id: paths and sha256 hashes, not full file
+content.
+
+```text
+$ get_skill_pack("a91f2c3d-…")
+
+{"id": "a91f2c3d-…", "version": 14, "manifest": {…},
+  "files": [{"path": "skills/rules/refunds/SKILL.md", "sha256": "…"}]}
+```

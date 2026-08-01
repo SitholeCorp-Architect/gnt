@@ -1,0 +1,62 @@
+---
+title: Outlook export
+sidebar_icon: mail
+description: Read a portable Outlook export until Outlook's own OAuth connector clears app review.
+---
+
+Outlook's own OAuth connector needs Microsoft's app-review process, the same story as Gmail's. Until
+that clears, `gnt prebrain --outlook` reads a portable Outlook export instead, no approval required,
+no gnt server ever in the read path.
+
+## Produce the export
+
+Outlook has no single-click whole-mailbox export to a portable format. What it does support natively
+is per message: open a message in Outlook on the web or new Outlook for Windows, open the message
+actions menu, and choose **Download** → **Download as EML** (Outlook on the web) or **Save as** (new
+Outlook for Windows). Each one writes a single `.eml` file. Repeat across the messages you want
+scanned, put them all in one folder, then point `--outlook` at that folder.
+
+For more than a handful of messages, script it against the Graph API instead:
+`GET /me/messages/{id}/$value` returns a message's raw MIME content, exactly what a `.eml` file
+holds. Loop it over a folder's message ids and write each response to its own file.
+
+**Not supported:** classic Outlook for Windows' Import/Export wizard, which only writes `.pst`,
+Microsoft's proprietary binary mailbox format. Parsing it would mean reverse-engineering a closed
+binary format instead of reading a documented text one, so `--outlook` never attempts it. If a `.pst`
+file is all you have, open it in classic Outlook and use the per-message export above, or bridge it
+through another mail client that can read PST and export EML or mbox.
+
+## mbox works too, if you already have one
+
+Outlook itself never produces an `.mbox` file, but if you bridged the mailbox through a tool that
+does (syncing it over IMAP into another mail client and exporting from there, for example), point
+`--outlook` at that single file instead of a folder. It's detected automatically and read the same
+way `--gmail` reads a Takeout export.
+
+## Scope it with flags
+
+Bound the date range and sender with `--outlook-since`/`--outlook-until` (YYYY-MM-DD) and
+`--outlook-from` (comma-separated addresses or domains). A malformed date skips the walker entirely
+rather than silently running it unscoped.
+
+```bash
+$ gnt prebrain --outlook ~/Exports/outlook-eml \
+    --outlook-since 2026-01-01 \
+    --outlook-from acme.com
+
+Found 96 candidate chunks:
+  Outlook export: 96 chunks across 19 files
+```
+
+## What it reads, and what it never does
+
+Same parsing and thread reconstruction as the Gmail export walker: messages are reconstructed into
+threads using each message's Message-ID, In-Reply-To, and References headers, HTML bodies are
+converted to plain text, and quoted history a reply carries along is stripped, so a long thread
+doesn't get reprocessed once per reply.
+
+Attachments are never opened. If a message has one, its filename is kept for context and nothing else
+about it is read.
+
+Same as every other prebrain walker: everything above happens on your device before the privacy gate
+runs, and only masked text ever reaches extraction.

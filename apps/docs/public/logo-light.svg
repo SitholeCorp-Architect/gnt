@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 132 28" width="132" height="28" role="img" aria-label="gnt.ai">
+  <!-- Same "[gnt.ai]" text wordmark as apps/web's own header
+       (components/marketing-header.tsx), not a fabricated new logo:
+       IBM Plex Mono bold, brackets in the light theme's muted tone at 50%
+       opacity (#4e4d4d), the word itself in the foreground tone (#242424).
+       Kept free of adjacent hyphen pairs in this comment on purpose: SVG
+       is parsed as strict XML when used as an img src, and two hyphens in
+       a row anywhere inside a comment is invalid there, which silently
+       breaks the whole document (found by a blank logo in the running
+       site, not by inspection). -->
+  <text x="0" y="21" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="22" font-weight="700" letter-spacing="-0.4">
+    <tspan fill="#4e4d4d" fill-opacity="0.5">[</tspan><tspan fill="#242424">gnt.ai</tspan><tspan fill="#4e4d4d" fill-opacity="0.5">]</tspan>
+  </text>
+</svg>

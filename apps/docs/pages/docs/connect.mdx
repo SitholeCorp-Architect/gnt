@@ -1,0 +1,78 @@
+---
+title: Connect
+sidebar_icon: plug
+description: Connect claude.ai, Claude Code, a raw MCP client, an OpenAI agent, or OpenClaw to gnt.
+---
+
+## claude.ai connectors
+
+In claude.ai, go to Settings → Connectors → Add custom connector. Paste your MCP endpoint (from
+`gnt keys create`) as the server URL, then add an `Authorization: Bearer gnt_live_xxxx` header with
+your key. All 5 tools become available in any chat once it's connected.
+
+## Claude Code
+
+Covered by the [quickstart](/docs/quickstart) above.
+
+## Raw MCP client (Python)
+
+Talk to the endpoint directly over streamable HTTP with the official MCP SDK.
+
+```python
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+URL = "https://api.gntai.dev/mcp/"
+TOKEN = "gnt_live_xxxx"
+
+async with streamablehttp_client(
+    URL, headers={"Authorization": f"Bearer {TOKEN}"}
+) as (read, write, _):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        result = await session.call_tool(
+            "search_rules", {"query": "refund window"}
+        )
+```
+
+## OpenAI-compatible agent
+
+The Responses API supports remote MCP servers as a tool type. Point it at the same endpoint and
+header.
+
+```python
+from openai import OpenAI
+
+client = OpenAI()
+resp = client.responses.create(
+    model="gpt-4.1",
+    input="What is our refund policy?",
+    tools=[{
+        "type": "mcp",
+        "server_label": "gnt-brain",
+        "server_url": "https://api.gntai.dev/mcp/",
+        "headers": {"Authorization": "Bearer gnt_live_xxxx"},
+    }],
+)
+```
+
+## OpenClaw
+
+Run `gnt connect openclaw` to detect a local install and write this for you, or add it to
+`~/.openclaw/openclaw.json` by hand and export `GNT_MCP_KEY` before starting the gateway. Connecting
+only makes the tools available, so pair it with the [check_action skill](/docs/enforce) below:
+that's what gets OpenClaw to actually call it before acting, not just have it on hand.
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "gnt-brain": {
+        "url": "https://api.gntai.dev/mcp/",
+        "transport": "streamable-http",
+        "headers": { "Authorization": "Bearer ${GNT_MCP_KEY}" }
+      }
+    }
+  }
+}
+```

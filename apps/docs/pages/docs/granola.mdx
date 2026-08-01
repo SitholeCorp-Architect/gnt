@@ -1,0 +1,43 @@
+---
+title: Granola
+sidebar_icon: mic
+description: Read meeting notes and transcripts straight out of Granola, scoped to folders you choose.
+---
+
+`gnt prebrain --mcp-granola` reads meeting notes and transcripts straight out of Granola, scoped to
+the folders you choose, through Granola's own MCP server. No export file, no gnt server in the read
+path.
+
+## Connect it
+
+Granola's MCP server authenticates with a one-time browser sign-in, not a pasted API key.
+`gnt connect granola-mcp` walks you through it, then checks the connection with one real read before
+saving anything.
+
+```text
+$ gnt connect granola-mcp
+
+✓ Saved. Run `gnt prebrain --mcp-granola …` to read from it.
+```
+
+## Scope it to folders
+
+`--granola-folders` takes one or more Granola folder ids, comma-separated. This connector never
+discovers folders on its own and never reads outside the folders you name.
+
+```text
+$ gnt prebrain --mcp-granola --granola-folders team-standups,eng-planning
+
+Found 46 candidate chunks:
+  Granola (live MCP): 46 chunks across 12 files
+```
+
+## What it reads, and what it never does
+
+For each meeting in a folder you scoped, it reads the verbatim transcript and Granola's own
+AI-written notes/summary. It never reads attendee lists, account/workspace identity, or anything from
+outside the folders you named. Those fields are stripped before this connector's own code ever runs,
+not just left unused.
+
+Same as every other prebrain walker: everything above happens on your device before the privacy gate
+runs, and only masked text ever reaches extraction.

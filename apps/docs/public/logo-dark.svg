@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 132 28" width="132" height="28" role="img" aria-label="gnt.ai">
+  <!-- Same "[gnt.ai]" text wordmark as apps/web's own header, dark-theme
+       colors: brackets in dark mode's ambient muted tone (#b9b5b4) at 50%
+       opacity, the word itself in the foreground tone (Parchment,
+       #f6f3f1). See logo-light.svg's own comment for why this file avoids
+       double hyphens entirely (invalid inside an XML comment, breaks
+       <img> rendering of the whole SVG). -->
+  <text x="0" y="21" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="22" font-weight="700" letter-spacing="-0.4">
+    <tspan fill="#b9b5b4" fill-opacity="0.5">[</tspan><tspan fill="#f6f3f1">gnt.ai</tspan><tspan fill="#b9b5b4" fill-opacity="0.5">]</tspan>
+  </text>
+</svg>

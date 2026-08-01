@@ -1,0 +1,67 @@
+---
+title: Gmail export
+sidebar_icon: mail
+description: Read a Google Takeout mail export until Gmail's own OAuth connector clears app review.
+---
+
+Gmail's own OAuth connector needs Google's app-review process, which runs on Google's timeline, not
+yours. Until that clears, `gnt prebrain --gmail` reads a Google Takeout mail export instead, no
+approval required, no gnt server ever in the read path.
+
+## Produce the export
+
+1. Go to **takeout.google.com** signed into the account you want to export.
+2. Click **Deselect all**, then check only **Mail**.
+3. Click **All Mail data included** next to Mail to open the label picker, and check only the labels
+   you actually want scanned instead of leaving every label selected. This is the cleanest way to
+   scope a whole mailbox down before anything reaches your device.
+4. Choose **Export once** and **.zip**.
+5. Once the export lands and you've unzipped it, point `--gmail` at the single `.mbox` file inside
+   `Takeout/Mail/`, not the outer .zip.
+
+## Scope it with flags
+
+Didn't label-filter the export, or want to scope it further? Bound the date range and sender with
+`--gmail-since`/`--gmail-until` (YYYY-MM-DD) and `--gmail-from` (comma-separated addresses or
+domains). A malformed date skips the walker entirely rather than silently running it unscoped.
+
+```bash
+$ gnt prebrain --gmail ~/Takeout/Mail/All\ mail\ Including\ Spam\ and\ Trash.mbox \
+    --gmail-since 2026-01-01 \
+    --gmail-from acme.com
+
+Found 214 candidate chunks:
+  Gmail export: 214 chunks across 38 files
+```
+
+## What it reads, and what it never does
+
+Messages are reconstructed into threads using each message's Message-ID, In-Reply-To, and References
+headers, so a reply is read with its context instead of alone. HTML bodies are converted to plain
+text. Quoted history a reply carries along (the "On ... wrote:" block, or a client's own
+quoted-thread styling) is stripped, so a long thread doesn't get reprocessed once per reply. Each
+message keeps only its own new content.
+
+Attachments are never opened. If a message has one, its filename is kept for context and nothing else
+about it is read.
+
+Same as every other prebrain walker: everything above happens on your device before the privacy gate
+runs, and only masked text ever reaches extraction.
+
+## Local docs folder, including a synced Dropbox folder
+
+`gnt prebrain --docs <path>` walks any directory on your machine for markdown and text files and
+turns matching prose into draft rules, through the same local privacy gate as every other source.
+Point it at a folder Dropbox's desktop client keeps synced and it works the same way, gnt only reads
+whatever has already landed on disk; Dropbox is what keeps that folder current, gnt never talks to
+Dropbox directly.
+
+Two things it handles for you in a synced folder specifically. It never reads into
+`.dropbox.cache`, Dropbox's own local staging directory, the same way it skips any other hidden
+directory. And it recognizes Dropbox's conflicted-copy naming, files renamed like
+`notes (jordan's conflicted copy 2026-07-18).md`, `notes (Case Conflict).md`, or
+`notes (Unicode Encoding Conflict).md` when Dropbox detects the same file was edited on two devices.
+Only the original, untagged filename is ingested, the tagged copy is skipped, so the same edit
+doesn't get read twice or, worse, get read as two documents that disagree with each other. If a
+tagged copy holds a change the original doesn't, resolve the conflict in Dropbox first, a directory
+listing alone can't tell which side you meant to keep.

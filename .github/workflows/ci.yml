@@ -1,0 +1,477 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege default: this workflow only lints/builds/tests, it never
+# pushes, comments, or publishes — read-only is sufficient for every step
+# below, and per-job overrides would only ever need to narrow this further.
+permissions:
+  contents: read
+
+jobs:
+  js:
+    name: js (lint, typecheck, build, test)
+    # 20 min is generous for what normally finishes in 1-2 min -- catches a
+    # wedged step instead of sitting until GitHub's 360-min default.
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 (full history, not just the last commit) -- turbo's
+      # --affected below needs to walk back to the PR's merge base (or the
+      # previous commit on push-to-main) to diff changed files. A shallow
+      # clone doesn't break this, turbo just falls back to treating
+      # everything as affected, but that silently defeats the point of this
+      # job, so pay for full history instead of finding out from a
+      # suspiciously-full CI run.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # apps/cli's own test script is `bun test` (its privacy-gate suite,
+      # including the eval/privacy-gate quality gate, needs bun:test). bun
+      # reads the node_modules pnpm already installed above; no separate
+      # `bun install` needed.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      # turbo's own GITHUB_BASE_REF auto-detection resolves to a bare branch
+      # name ("main"), which doesn't exist as a local ref in this checkout --
+      # only origin/main does -- so it fails to resolve and silently falls
+      # back to treating every package as affected (safe, but defeats the
+      # point). Set TURBO_SCM_BASE explicitly instead of trusting the
+      # auto-detect: origin/<base branch> for a PR, the pre-push commit for
+      # a push to main, origin/main for anything else (e.g. a manual
+      # workflow_dispatch run).
+      - name: Resolve turbo affected base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.event.pull_request.base.ref }}"
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            base="${{ github.event.before }}"
+          else
+            base="origin/main"
+          fi
+          echo "TURBO_SCM_BASE=$base" >> "$GITHUB_ENV"
+
+      # --affected scopes this to packages actually touched by the diff
+      # (base set above, head defaults to this checkout's HEAD). A change to
+      # a package's own dependency closure (root lockfile, a shared package
+      # it imports) still marks it affected, so a broad diff still gets the
+      # full check -- this only narrows work for diffs that are genuinely
+      # narrow. One combined invocation, not four: turbo already schedules
+      # lint/typecheck/build/test concurrently across the task graph, so
+      # splitting into separate steps or jobs here would only add
+      # checkout/install overhead per job without shortening the actual
+      # critical path.
+      - run: pnpm turbo run lint typecheck build test --affected
+
+  clean-install:
+    name: clean install (no secrets, from scratch)
+    # This is the repo's own proof that a contributor with nothing but a
+    # git clone -- no .env, no repo secrets, none of the CI-only
+    # placeholder values the jobs below set -- can get every JS/TS
+    # workspace and the API to install and typecheck, matching the
+    # README's own quickstart. Full test suites need live Postgres/Redis
+    # (an infra question, covered by the web/store/api jobs' own
+    # throwaway containers below), not private credentials -- out of
+    # scope here on purpose.
+    #
+    # Was briefly pinned to the self-hosted macOS runner: dispatching this
+    # workflow by hand once turned up a real GitHub Actions billing block
+    # on ubuntu-latest ("The job was not started because recent account
+    # payments have failed or your spending limit needs to be increased"),
+    # not a code problem, not a paths filter, not a secrets/fork condition
+    # -- GitHub Actions refused to even queue the job. Self-hosted runners
+    # aren't metered by GitHub, so that was a billing-immune escape valve
+    # while the account's Actions billing was unresolved. Confirmed fixed
+    # (a fresh dispatch started immediately on ubuntu-latest with no
+    # billing annotation) -- back to a plain github-hosted runner, which is
+    # what actually proves "works on a vanilla runner too, not just this
+    # project's own machine." If Actions billing breaks again, self-hosted
+    # is the known way out.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm turbo run lint typecheck
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: 0.12.1
+          enable-cache: true
+
+      - run: uv sync --dev
+        working-directory: apps/api
+
+      - run: uv run ruff check .
+        working-directory: apps/api
+
+  store:
+    name: store (lint, typecheck, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/store
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      # NativeStore is Postgres-only, no in-memory mode -- same
+      # docker-run-by-hand pattern the api job below uses (GH Actions'
+      # `services:` container orchestration doesn't work on the
+      # self-hosted macOS runner). POSTGRES_HOST_AUTH_METHOD=trust: this
+      # container is throwaway and only ever reachable from this job, so
+      # skipping a password matches native-store.test.ts's own default
+      # connection string, no credentials needed.
+      #
+      # Container name and host port are both run-scoped (run_id +
+      # run_attempt), not fixed -- caught this live: two of these jobs
+      # running on the shared self-hosted runner at the same time used to
+      # both fight over a container literally named ci-store-postgres on
+      # port 5432, so whichever job's `docker rm -f` ran second would kill
+      # the other job's still-in-use database mid-test, or (worse) the two
+      # jobs would silently share one Postgres and each see the other's
+      # rows -- exactly the shape of the duplicated-audit-trail-entries
+      # failure that kept showing up. A random host port (-p 127.0.0.1::5432,
+      # left blank so Docker picks one) makes two of these containers unable
+      # to collide even under real concurrency.
+      - name: Start postgres
+        run: |
+          set -euo pipefail
+          NAME="ci-store-postgres-${{ github.run_id }}-${{ github.run_attempt }}"
+          echo "STORE_PG_CONTAINER=$NAME" >> "$GITHUB_ENV"
+          docker rm -f "$NAME" >/dev/null 2>&1 || true
+          docker run -d --name "$NAME" \
+            -e POSTGRES_USER=postgres -e POSTGRES_HOST_AUTH_METHOD=trust \
+            -p 127.0.0.1::5432 \
+            pgvector/pgvector:pg17
+          for i in $(seq 1 30); do
+            docker exec "$NAME" pg_isready -U postgres >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec "$NAME" pg_isready -U postgres
+          docker exec "$NAME" psql -U postgres -c 'CREATE DATABASE gnt_store_native_test'
+          PORT=$(docker port "$NAME" 5432/tcp | head -1 | cut -d: -f2)
+          echo "STORE_NATIVE_TEST_DATABASE_URL=postgres://postgres@localhost:$PORT/gnt_store_native_test" >> "$GITHUB_ENV"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run lint
+
+      - run: bun run typecheck
+
+      - run: bun run test
+
+      - name: Stop postgres
+        if: always()
+        run: docker rm -f "$STORE_PG_CONTAINER" >/dev/null 2>&1 || true
+
+  api:
+    name: api (ruff, pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      # No apps/api/.env in CI (gitignored) — every required Settings
+      # field gets a throwaway value here instead. Nothing under test
+      # touches Slack/Anthropic for real, these just have to parse.
+      #
+      # DATABASE_URL/CRON_DATABASE_URL name gnt_app/gnt_cron, not the
+      # Postgres service's own superuser (gnt) — so CI genuinely exercises
+      # the same restricted, RLS-enforcing roles production uses (see
+      # migrations 0013/0014), not a connection that bypasses RLS
+      # entirely. Those roles don't exist until the first test session's
+      # migration step creates them, and migrations never set a role's
+      # password (see 0013's docstring) — conftest.py's _sync_role_password
+      # sets it to match these placeholder passwords right after
+      # migrating, every run, since this container is destroyed after CI
+      # finishes anyway.
+      DATABASE_URL: postgresql+asyncpg://gnt_app:ci-placeholder@localhost:15432/gnt
+      MIGRATION_DATABASE_URL: postgresql+asyncpg://gnt:gnt@localhost:15432/gnt
+      CRON_DATABASE_URL: postgresql+asyncpg://gnt_cron:ci-placeholder@localhost:15432/gnt
+      REDIS_URL: redis://localhost:16379/0
+      GROQ_API_KEY: ci-placeholder
+      CONTRIBUTOR_HASH_SECRET: ci-placeholder
+      SLACK_CLIENT_ID: ci-placeholder
+      SLACK_CLIENT_SECRET: ci-placeholder
+      SLACK_SIGNING_SECRET: ci-placeholder
+      SLACK_STATE_SECRET: ci-placeholder
+      # Unlike the plain placeholders above, this has to be a real Fernet
+      # key (not an arbitrary string) — same reasoning as
+      # GITHUB_PAT_ENCRYPTION_KEY below. Was "ci-placeholder" (an invalid
+      # Fernet key) until test_org_offboarding.py became the first test
+      # ever to call encrypt_slack_token for real — nothing had exercised
+      # this env var's actual value before then. CI-only value, not a
+      # secret protecting anything real.
+      SLACK_TOKEN_ENCRYPTION_KEY: u6EciGcx1D4ly_Cvod7ajEkc4lPF57Xu9aOgODJ1Jjc=
+      # Unlike the plain placeholders above, this has to be a real Fernet
+      # key (not an arbitrary string) — test_github_connection.py calls
+      # encrypt_token/decrypt_token for real. CI-only value, not a secret
+      # protecting anything real.
+      GITHUB_PAT_ENCRYPTION_KEY: tJRAPluXs7Vgx7-CxIWUI6J03AP0DWVvaYmcz_c6qt0=
+      # Same reasoning as SLACK_TOKEN_ENCRYPTION_KEY/GITHUB_PAT_ENCRYPTION_KEY
+      # above -- test_zendesk_connection.py/test_intercom_connection.py call
+      # encrypt_token/decrypt_token for real. Settings requires these two
+      # (no default), so their absence here isn't just an untested corner --
+      # Settings() itself fails to construct without them, which means every
+      # test in this job errors at collection time until they're set.
+      # CI-only values, not secrets protecting anything real.
+      ZENDESK_TOKEN_ENCRYPTION_KEY: qPTJl1eogW1bR3gz9_AvTEcqPD14y1bXdq8z5X_UODI=
+      INTERCOM_TOKEN_ENCRYPTION_KEY: _lPYp-UWnt2btBxLMF_rDqPFcfO3zLOS_prT14v1eUw=
+      # test_notion_connector.py/test_linear_connector.py call
+      # encrypt_token/decrypt_token and build_authorize_url for real, same
+      # "Settings() itself fails to construct without them" reasoning as
+      # ZENDESK_TOKEN_ENCRYPTION_KEY above. client id/secret values here are
+      # throwaway strings, not the real ones apps/api's own .env holds --
+      # nothing under test makes a live call to Notion's or Linear's OAuth
+      # endpoints.
+      NOTION_CLIENT_ID: ci-placeholder
+      NOTION_CLIENT_SECRET: ci-placeholder
+      NOTION_STATE_SECRET: ci-placeholder
+      NOTION_TOKEN_ENCRYPTION_KEY: TAJsD8bP40HHRvLeyD7S5lE2KdRDm7Gs-0vxhb4fQmE=
+      LINEAR_CLIENT_ID: ci-placeholder
+      LINEAR_STATE_SECRET: ci-placeholder
+      LINEAR_TOKEN_ENCRYPTION_KEY: dj-_tSp0hjH0yitMF8BzBJsaemM3WULNsFKbokOwHBo=
+      # apps/store's internal API — nothing under test
+      # spawns a real apps/store process against these except the
+      # subprocess-backed integration tests, which set their own values.
+      STORE_INTERNAL_API_SECRET: ci-placeholder
+      APPROVAL_SIGNING_SECRET: ci-placeholder
+      # NativeStore is Postgres-only — a plain postgres:// URL (the
+      # `postgres` npm package), not this job's own postgresql+asyncpg://
+      # one, and a dedicated database (created below) so its tables never
+      # share a schema with apps/api's own. Superuser gnt:gnt, not the
+      # RLS-restricted gnt_app role above: NativeStore's schema bootstrap
+      # runs DDL (CREATE TABLE/EXTENSION), which gnt_app deliberately can't
+      # do. Read by conftest.py's `_store_server` fixture (the whole pytest
+      # suite's spawned store) and by eval-serve.ts, spawned via
+      # store_harness.py's EvalStoreHarness (the retrieval eval).
+      GNT_STORE_TEST_DATABASE_URL: postgres://gnt:gnt@localhost:15432/gnt_store_native_test
+      GNT_STORE_EVAL_NATIVE_DATABASE_URL: postgres://gnt:gnt@localhost:15432/gnt_store_native_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      # Docker containers started by hand rather than GitHub Actions' own
+      # `services:` orchestration -- ubuntu-latest's `services:` would work
+      # fine here, but this also has to keep working on the self-hosted
+      # macOS runner if that ever comes back into rotation (`services:`
+      # only works on Linux runners at all), so one code path that works on
+      # any OS with Docker beats two runner-specific ones. rm -f first
+      # clears a stale container left behind by a cancelled previous run;
+      # the matching teardown step below always runs, cancelled or not.
+      - name: Start postgres + redis
+        run: |
+          set -euo pipefail
+          docker rm -f ci-postgres ci-redis >/dev/null 2>&1 || true
+          docker run -d --name ci-postgres \
+            -e POSTGRES_USER=gnt -e POSTGRES_PASSWORD=gnt -e POSTGRES_DB=gnt \
+            -p 15432:5432 \
+            pgvector/pgvector:pg17
+          docker run -d --name ci-redis -p 16379:6379 redis:7-alpine
+          for i in $(seq 1 30); do
+            docker exec ci-postgres pg_isready -U gnt >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec ci-postgres pg_isready -U gnt
+          for i in $(seq 1 30); do
+            docker exec ci-redis redis-cli ping >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec ci-redis redis-cli ping
+          # Separate database on the same container for apps/store's
+          # NativeStore subprocesses (conftest.py's _store_server fixture,
+          # the retrieval eval's EvalStoreHarness) — see this job's
+          # GNT_STORE_TEST_DATABASE_URL/GNT_STORE_EVAL_NATIVE_DATABASE_URL.
+          docker exec ci-postgres psql -U gnt -d gnt -c 'CREATE DATABASE gnt_store_native_test'
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: 0.12.1
+          enable-cache: true
+
+      - run: uv sync --dev
+
+      - run: uv run ruff check .
+
+      # conftest.py's _store_server fixture spawns a REAL apps/store
+      # process (bun run src/http/server.ts) for the whole test session —
+      # routers/rules.py talks to it over real HTTP,
+      # not a mocked store_client. Needs Bun installed and apps/store's
+      # own deps present, or every test errors at fixture setup.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - run: bun install --frozen-lockfile
+        working-directory: apps/store
+
+      - run: uv run pytest
+
+      - name: Stop postgres + redis
+        if: always()
+        run: docker rm -f ci-postgres ci-redis >/dev/null 2>&1 || true
+
+  alembic-migration-changes:
+    name: detect alembic migration changes
+    # Cheap gate for the real job below -- alembic-check spins up its own
+    # throwaway Postgres and does a full `uv sync`, not worth paying for on
+    # every unrelated PR. ci.yml is one workflow with a single shared `on:`
+    # trigger (unlike self-host-compose.yml, which is its own workflow file
+    # with a top-level `paths:` filter) -- Actions has no per-job `paths:`,
+    # so this reproduces the same "only run when it matters" effect as a
+    # tiny job of its own, gating alembic-check via `needs`/`if` below. Base
+    # resolution mirrors the web job's own TURBO_SCM_BASE step exactly, same
+    # reasoning: PR against the PR's base, push against the pre-push commit,
+    # anything else (workflow_dispatch) against origin/main.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          fetch-depth: 0
+
+      - id: check
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.event.pull_request.base.ref }}"
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            base="${{ github.event.before }}"
+          else
+            base="origin/main"
+          fi
+          if git diff --name-only "$base"...HEAD | grep -qE '^apps/api/(migrations/versions/|alembic\.ini$)'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  alembic-check:
+    name: alembic-check (upgrade head against a fresh db)
+    # The single highest-risk gap this pipeline had before this job existed:
+    # nothing verified a migration actually applies cleanly before it could
+    # reach production. Deliberately read-only in effect -- throwaway
+    # container only, never a real database -- and needs no real secrets,
+    # same "every required Settings field gets a CI-only throwaway value"
+    # convention the api job above already establishes (get_settings() is
+    # called at import time by migrations/env.py too, so Settings() has to
+    # construct here the same way it does for the api job).
+    needs: alembic-migration-changes
+    if: needs.alembic-migration-changes.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      # Superuser role on a fresh, empty database -- alembic/env.py only
+      # ever reads migration_database_url (falling back to database_url),
+      # so database_url's value itself is never actually connected to here;
+      # kept identical to it anyway rather than inventing a second throwaway
+      # value with no purpose. Same placeholder convention (and, for the
+      # Fernet-backed keys, the same literal values) as the api job's own
+      # env block above -- nothing here needs to be a distinct secret,
+      # migrations never read any of these beyond Settings() constructing.
+      # Port filled in by the "Start postgres" step below, not hardcoded to
+      # 15432 like the api job's own fixed port -- that's fine for the api
+      # job (one throwaway container, one job) but this job runs concurrently
+      # with it, and a fixed matching port would collide on the self-hosted
+      # single-machine runner this pipeline stays portable to (see the api
+      # job's own docker-run-by-hand comment above).
+      GROQ_API_KEY: ci-placeholder
+      CONTRIBUTOR_HASH_SECRET: ci-placeholder
+      SLACK_CLIENT_ID: ci-placeholder
+      SLACK_CLIENT_SECRET: ci-placeholder
+      SLACK_SIGNING_SECRET: ci-placeholder
+      SLACK_STATE_SECRET: ci-placeholder
+      SLACK_TOKEN_ENCRYPTION_KEY: u6EciGcx1D4ly_Cvod7ajEkc4lPF57Xu9aOgODJ1Jjc=
+      GITHUB_PAT_ENCRYPTION_KEY: tJRAPluXs7Vgx7-CxIWUI6J03AP0DWVvaYmcz_c6qt0=
+      ZENDESK_TOKEN_ENCRYPTION_KEY: qPTJl1eogW1bR3gz9_AvTEcqPD14y1bXdq8z5X_UODI=
+      INTERCOM_TOKEN_ENCRYPTION_KEY: _lPYp-UWnt2btBxLMF_rDqPFcfO3zLOS_prT14v1eUw=
+      NOTION_CLIENT_ID: ci-placeholder
+      NOTION_CLIENT_SECRET: ci-placeholder
+      NOTION_STATE_SECRET: ci-placeholder
+      NOTION_TOKEN_ENCRYPTION_KEY: TAJsD8bP40HHRvLeyD7S5lE2KdRDm7Gs-0vxhb4fQmE=
+      LINEAR_CLIENT_ID: ci-placeholder
+      LINEAR_STATE_SECRET: ci-placeholder
+      LINEAR_TOKEN_ENCRYPTION_KEY: dj-_tSp0hjH0yitMF8BzBJsaemM3WULNsFKbokOwHBo=
+      STORE_INTERNAL_API_SECRET: ci-placeholder
+      APPROVAL_SIGNING_SECRET: ci-placeholder
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      # Same docker-run-by-hand pattern as the api/store jobs above, not
+      # GitHub Actions' `services:` block -- see the store job's comment for
+      # why. Run-scoped container name AND a random host port (like store's,
+      # not api's fixed ci-postgres:15432) -- this job runs in parallel with
+      # the api job, so a fixed 15432 here would collide with api's own on
+      # the self-hosted single-machine runner this pipeline stays portable
+      # to, the exact failure mode store's own comment above documents.
+      - name: Start postgres
+        run: |
+          set -euo pipefail
+          NAME="ci-alembic-postgres-${{ github.run_id }}-${{ github.run_attempt }}"
+          echo "ALEMBIC_PG_CONTAINER=$NAME" >> "$GITHUB_ENV"
+          docker rm -f "$NAME" >/dev/null 2>&1 || true
+          docker run -d --name "$NAME" \
+            -e POSTGRES_USER=gnt -e POSTGRES_PASSWORD=gnt -e POSTGRES_DB=gnt \
+            -p 127.0.0.1::5432 \
+            pgvector/pgvector:pg17
+          for i in $(seq 1 30); do
+            docker exec "$NAME" pg_isready -U gnt >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec "$NAME" pg_isready -U gnt
+          PORT=$(docker port "$NAME" 5432/tcp | head -1 | cut -d: -f2)
+          echo "DATABASE_URL=postgresql+asyncpg://gnt:gnt@localhost:$PORT/gnt" >> "$GITHUB_ENV"
+          echo "MIGRATION_DATABASE_URL=postgresql+asyncpg://gnt:gnt@localhost:$PORT/gnt" >> "$GITHUB_ENV"
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: 0.12.1
+          enable-cache: true
+
+      - run: uv sync
+
+      - run: uv run alembic upgrade head
+
+      - name: Stop postgres
+        if: always()
+        run: docker rm -f "$ALEMBIC_PG_CONTAINER" >/dev/null 2>&1 || true

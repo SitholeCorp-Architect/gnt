@@ -1,0 +1,278 @@
+---
+title: Webhooks & more sources
+sidebar_icon: webhook
+description: Pull decision-prose into gnt from the tools your team already uses, as draft rules awaiting review.
+---
+
+Everything on the [Connect](/docs/connect) page connects an agent _out_ to your rules. This is the
+other direction: pulling decision-prose _in_ from tools your team already uses, a monday.com item
+comment, a HubSpot engagement note, a ticket thread, without anyone hand-typing it. Each ingested
+item lands as a draft rule, exactly like `POST /v1/rules` would, ready for someone to review and
+submit through the normal `gnt review` flow. Nothing here skips human approval, it only skips the
+copy-paste.
+
+## Create an ingest URL
+
+Each token is its own credential, scoped to this org, and can only ever create draft rules, nothing
+else an MCP key can do.
+
+```text
+$ gnt webhook create "monday zap"
+
+Ingest URL: https://api.gntai.dev/v1/webhooks/ingest/whk_xxxx
+
+# This is shown once, copy it now.
+```
+
+## From your tool's outbound webhook settings
+
+Any tool or system that can send an HTTP POST can feed gnt, monday.com, HubSpot, or whatever else
+holds your comment/note stream. Point its outbound webhook action at the ingest URL from
+`gnt webhook create`, set the payload type to JSON, and map fields:
+
+1. `body` to the comment/note text.
+2. `title` to whatever short label the source gives you (an item name, a subject line); trim it down
+   if the field is long free text.
+3. `source` is optional but worth mapping too (a permalink back to the item/note); it shows up on the
+   pull request so whoever reviews it can check the rule against where it came from.
+
+Turn it on. Every new comment/note becomes a draft rule.
+
+## Raw webhook (anything else)
+
+Prefer to skip the middleman? Any tool that can send a JSON POST works the same way. The token is
+embedded in the URL itself, no custom headers required.
+
+```bash
+$ curl -X POST "$INGEST_URL" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "title": "Refund window",
+      "body": "Refunds within 30 days get a full refund; after that, store credit only.",
+      "source": "monday.com item comment"
+    }'
+
+{"id": "8f2c…", "status": "draft"}
+```
+
+## Other ways rules get in
+
+Webhooks aren't the only ambient source. `gnt connect slack` connects a workspace, then anyone can
+type `/brain` plus a message in Slack to draft a rule the same way, that content and this webhook
+path both reach gnt's server directly and get masked there on arrival, permanently, since neither has
+a customer device in the loop.
+
+`gnt connect notion-mcp`, `gnt connect monday-mcp`, `gnt connect linear-mcp`, `gnt connect jira-mcp`,
+`gnt connect sentry-mcp`, `gnt connect granola-mcp`, and `gnt connect zoom-mcp` are different:
+`gnt prebrain --mcp-notion`, `--mcp-monday`, `--mcp-linear`, `--mcp-jira`, `--mcp-sentry`,
+`--mcp-granola`, or `--mcp-zoom` pulls read-only content straight from those tools' own official MCP
+servers, but the pull happens locally, from your device, through the same CLI-side privacy gate every
+other prebrain walker uses. Connected several of these already? `gnt prebrain --all` turns every
+connector below on at once instead of listing each flag by name. It only enables a connector; it
+doesn't invent scope, so one that needs its own scope flag (`--linear-teams`, `--gitlab-projects`,
+and so on) still skips with its usual message unless that flag comes along with it.
+
+Linear's adapter reads issue descriptions, comments, and project documents within the teams and
+projects you scope it to (`--linear-teams` / `--linear-projects`). It never reads workspace-wide, and
+it never touches assignee, priority, or any other issue metadata, only the prose. See the
+[Granola](/docs/granola) and [Zoom](/docs/zoom) pages for the two meeting-transcript connectors
+specifically. `gnt prebrain --gmail` is the same local-first shape again, reading a Gmail export
+instead of a live connection, and so is `gnt prebrain --outlook` for an Outlook export, and
+`gnt prebrain --meeting-notes` for an Otter, Fireflies, or Fathom transcript export. See the
+[Gmail export](/docs/gmail-export), [Outlook export](/docs/outlook-export), and
+[Meeting notes export](/docs/meeting-notes-export) pages.
+
+Jira's adapter reads issue summaries, descriptions, and comments within the projects you scope it to
+(`--jira-projects`), plus which Atlassian site to read from (`--jira-cloud-id`). It never reads
+project-wide or instance-wide, and it never touches assignee, reporter, watcher, or custom field
+data, only the prose. Jira stores rich text as a structured format rather than plain text; this
+adapter converts it to plain text on your device before it ever reaches the privacy gate, dropping
+formatting and any mentioned teammate's account id along the way, keeping only what they wrote.
+
+Sentry reads narrower than the other two on purpose. Point `--mcp-sentry` at an org and a list of
+project slugs and it reads each project's open issues, one draft rule candidate per issue: the
+issue's own title, its status, and a link back to it in Sentry. It never reads stack traces,
+breadcrumbs, event or user data, tags, counts, or issue comments. Sentry's own MCP server doesn't
+expose issue comments through a plain read-only tool call today, so this connector simply doesn't
+read them rather than reach for a workaround.
+
+<details>
+<summary>**Figma comments**</summary>
+
+`gnt connect figma` stores a personal access token the same local-only way, and
+`gnt prebrain --figma-comments` reads straight from Figma's own REST API, not an MCP server. There's
+no first-party Figma MCP tool that reads file comments at all, so this connects directly instead of
+routing a token through a third-party wrapper. Point it at the exact files you want scanned with
+`--figma-files` (comma-separated file keys, taken from a file's own URL); it never discovers files or
+projects on its own.
+
+Only a comment's own message text is ever read. The commenter's name, avatar, and the comment's
+position on the canvas are never touched, let alone chunked.
+
+```bash
+$ gnt connect figma
+$ gnt prebrain --figma-comments --figma-files abc123,def456
+
+Found 12 candidate chunks:
+  Figma comments: 12 chunks across 9 files
+```
+
+</details>
+
+<details>
+<summary>**Datadog notebooks**</summary>
+
+`gnt connect datadog` stores an API key and application key pair the same local-only way, and
+`gnt prebrain --datadog-notebooks` reads straight from Datadog's own REST API, not an MCP server.
+Datadog does publish one, but only over a remote connection this CLI's local-first connectors don't
+speak, so this reads directly instead. Point it at the exact notebooks you want scanned with
+`--datadog-notebook-ids` (comma-separated ids, taken from a notebook's own URL); it never lists or
+discovers notebooks on its own.
+
+Only a notebook's title and its markdown text cells are ever read. Graph, log, and monitor cells
+attached to the same notebook are walked past and never chunked, and this connector never reads
+metrics, monitor definitions, log data, or dashboards at all. Datadog generates an incident
+postmortem as a notebook, so this same read path is how postmortem write-ups come in too. The
+separate incident record itself (severity, affected services, timeline) is never read.
+
+```bash
+$ gnt connect datadog
+$ gnt prebrain --datadog-notebooks --datadog-notebook-ids 4821,5093
+
+Found 8 candidate chunks:
+  Datadog notebooks: 8 chunks across 2 files
+```
+
+</details>
+
+<details>
+<summary>**GitLab threads**</summary>
+
+`gnt connect gitlab-threads` stores a project or personal access token (scoped to `read_api`) the
+same local-only way, and `gnt prebrain --gitlab-threads` reads straight from GitLab's own REST API,
+not an MCP server. GitLab does publish one, but it's still Beta and authenticates with an interactive
+OAuth flow this CLI's paste-a-token connectors don't speak, so this reads directly instead. Point it
+at the exact projects you want scanned with `--gitlab-projects` (comma-separated project ids or
+"namespace/project" paths); it never discovers projects or groups on its own.
+
+Only a merge request or issue's discussion threads are ever read. The diff, file changes, and commit
+history are never touched, and a system-generated audit-trail note ("changed the description",
+"assigned to @user") is dropped outright rather than treated as something a person wrote. Self-managed
+GitLab is supported with `--gitlab-url`.
+
+```bash
+$ gnt connect gitlab-threads
+$ gnt prebrain --gitlab-threads --gitlab-projects acme/widgets,42
+
+Found 14 candidate chunks:
+  GitLab threads: 14 chunks across 9 files
+```
+
+</details>
+
+<details>
+<summary>**HubSpot notes**</summary>
+
+`gnt connect hubspot` stores a private app access token the same local-only way, and
+`gnt prebrain --hubspot-notes` reads straight from HubSpot's own REST CRM API, not an MCP server.
+HubSpot's hosted MCP server is OAuth-only with no static token this local-first connector can use,
+and its self-hosted MCP package bundles read/write access across every CRM object behind tools whose
+exact fields aren't independently verifiable, so this reads directly instead of routing a token
+through either one. Point it at the exact deal pipelines and/or teams you want scanned with
+`--hubspot-pipelines` and `--hubspot-teams` (comma-separated ids, at least one required); it never
+discovers pipelines or teams on its own.
+
+```bash
+$ gnt connect hubspot
+$ gnt prebrain --hubspot-notes --hubspot-pipelines 12345 --hubspot-teams 67890
+
+Found 14 candidate chunks:
+  HubSpot notes: 14 chunks across 9 files
+```
+
+Only a note's own written text is ever read: notes attached to a deal in a scoped pipeline, and notes
+owned by a scoped team's members. Contact records, company records, and a deal's own fields (amount,
+stage, close date) are never read. Deals and owners are only ever looked up by id to find the right
+notes, never for their own properties. Playbook content has no public HubSpot API today, so this
+connector doesn't read it rather than reach for a workaround.
+
+Same as every other prebrain walker: everything above happens on your device before the privacy gate
+runs, and only masked text ever reaches extraction.
+
+</details>
+
+<details>
+<summary>**Airtable**</summary>
+
+`gnt connect airtable` is interactive, not a single pasted token: paste a personal access token, pick
+which base to connect, then for each table you want scanned, see its real fields live and explicitly
+choose which ones are safe prose. A table you skip, or leave with no fields picked, is never read.
+That choice matters more here than for any other connector on this page: a base's fields are entirely
+up to whoever built it, so there's no fixed shape to trust the way a Figma comment or a Datadog
+notebook has. `gnt prebrain --airtable` then reads straight from Airtable's own REST API, not an MCP
+server, and only ever reads the exact fields picked at connect time. A field nobody picked is
+structurally unreachable, not just unread, and a table with zero fields picked is never queried at
+all. Unlike every other connector here, it takes no per-run scope flags: the base, the tables, and
+the field selection are all decided once, in `gnt connect airtable` itself.
+
+```bash
+$ gnt connect airtable
+$ gnt prebrain --airtable
+
+Found 19 candidate chunks:
+  Airtable: 19 chunks across 2 files
+```
+
+</details>
+
+<details>
+<summary>**Zendesk**</summary>
+
+Zendesk is different from every other connector on this page: it runs on gnt's own server, not your
+device. Everything else above (Figma, Datadog, the MCP-in walkers on the other pages) is
+`gnt prebrain` reading locally, from your machine, through the CLI-side privacy gate. Zendesk support
+content changes continuously, so this connects once and syncs on a nightly schedule instead. A
+customer support token, generated self-serve in your own Zendesk admin (no app review), is stored
+encrypted on gnt's server and read by a scheduled job.
+
+What it reads: macros (the canned-reply text agents insert, not what they trigger), internal notes on
+tickets (the non-public ones agents leave for each other, never a reply the customer sees), and
+help-center article bodies. Prose only, in all three cases.
+
+What it never reads: the ticket record itself. No requester, no custom fields, no contact info, no
+subject line, no priority or status, no satisfaction rating. The adapter that talks to Zendesk's API
+is written so those fields are structurally unreachable, not just filtered out after the fact.
+
+Because this runs server-side, every piece of content gnt reads is masked by the same privacy gate
+the webhook path above uses. That masking is permanent, done before extraction ever sees it, the same
+way Slack's `/brain` command is masked on arrival. Extraction turns masked macro/note/article text
+into candidate rules, which land in your normal review queue exactly like any other draft. Nothing is
+ever auto-approved. Disconnecting removes the stored credential immediately.
+
+</details>
+
+<details>
+<summary>**Intercom**</summary>
+
+Intercom is different from every other connector on this page: it runs on gnt's own server, not your
+device. Everything else above (Figma, Datadog, the MCP-in walkers on the other pages) is
+`gnt prebrain` reading locally, from your machine, through the CLI-side privacy gate. Support content
+in Intercom changes continuously, so this connects once and syncs on a nightly schedule instead. An
+access token, generated self-serve in your own workspace's Developer Hub (no app review), is stored
+encrypted on gnt's server and read by a scheduled job.
+
+What it reads: saved replies (the canned-reply text agents insert, not who can use them), internal
+notes on conversations (the teammate-only notes agents leave for each other, never a reply the
+customer sees), and help-center article bodies. Prose only, in all three cases.
+
+What it never reads: the contact record itself. No email, no phone number, no name, no custom
+attributes, no company or segment membership. The adapter that talks to Intercom's API is written so
+those fields are structurally unreachable, not just filtered out after the fact.
+
+Because this runs server-side, every piece of content gnt reads is masked by the same privacy gate
+the webhook path above uses. That masking is permanent, done before extraction ever sees it, the same
+way Slack's `/brain` command is masked on arrival. Extraction turns masked reply/note/article text
+into candidate rules, which land in your normal review queue exactly like any other draft. Nothing is
+ever auto-approved. Disconnecting removes the stored credential immediately.
+
+</details>
