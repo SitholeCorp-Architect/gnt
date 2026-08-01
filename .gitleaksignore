@@ -7,3 +7,32 @@
 # cut, orphan root commit) — every prior entry was fingerprinted to a
 # private-repo commit SHA that doesn't exist in this repo's history at all,
 # so carrying them forward would just be dead weight.
+
+# Six throwaway Fernet keys CI needs to be validly-formatted (not real
+# secrets, not "ci-placeholder" strings) so Settings() can construct and
+# so the test suite's real encrypt/decrypt round-trip tests
+# (test_org_offboarding.py, test_github_connection.py,
+# test_zendesk_connection.py, test_intercom_connection.py,
+# test_notion_connector.py, test_linear_connector.py) have something
+# valid to encrypt against. Destroyed with the CI container every run,
+# never protect anything real. Same values in apps/api/scripts/
+# generate_openapi.py, which imports gnt.config for real to generate the
+# OpenAPI spec and needs the same env to construct Settings() offline.
+dc8551574bd52978716828dd1fbd1653c573ba7b:.github/workflows/ci.yml:generic-api-key:241
+dc8551574bd52978716828dd1fbd1653c573ba7b:.github/workflows/ci.yml:generic-api-key:246
+dc8551574bd52978716828dd1fbd1653c573ba7b:.github/workflows/ci.yml:generic-api-key:254
+dc8551574bd52978716828dd1fbd1653c573ba7b:.github/workflows/ci.yml:generic-api-key:255
+dc8551574bd52978716828dd1fbd1653c573ba7b:.github/workflows/ci.yml:generic-api-key:266
+dc8551574bd52978716828dd1fbd1653c573ba7b:.github/workflows/ci.yml:generic-api-key:269
+dc8551574bd52978716828dd1fbd1653c573ba7b:.github/workflows/ci.yml:generic-api-key:424
+dc8551574bd52978716828dd1fbd1653c573ba7b:.github/workflows/ci.yml:generic-api-key:425
+dc8551574bd52978716828dd1fbd1653c573ba7b:.github/workflows/ci.yml:generic-api-key:426
+dc8551574bd52978716828dd1fbd1653c573ba7b:.github/workflows/ci.yml:generic-api-key:427
+dc8551574bd52978716828dd1fbd1653c573ba7b:.github/workflows/ci.yml:generic-api-key:431
+dc8551574bd52978716828dd1fbd1653c573ba7b:.github/workflows/ci.yml:generic-api-key:434
+dc8551574bd52978716828dd1fbd1653c573ba7b:apps/api/scripts/generate_openapi.py:generic-api-key:31
+dc8551574bd52978716828dd1fbd1653c573ba7b:apps/api/scripts/generate_openapi.py:generic-api-key:32
+dc8551574bd52978716828dd1fbd1653c573ba7b:apps/api/scripts/generate_openapi.py:generic-api-key:33
+dc8551574bd52978716828dd1fbd1653c573ba7b:apps/api/scripts/generate_openapi.py:generic-api-key:34
+dc8551574bd52978716828dd1fbd1653c573ba7b:apps/api/scripts/generate_openapi.py:generic-api-key:38
+dc8551574bd52978716828dd1fbd1653c573ba7b:apps/api/scripts/generate_openapi.py:generic-api-key:41
