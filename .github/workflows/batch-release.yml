@@ -13,8 +13,13 @@ name: Batch release (public contributions)
 #
 # Diffs from whichever release is most recent chronologically -- a real
 # cli-vX.Y.Z npm release (see publish-cli.yml in the private repo) or a
-# previous public-YYYY-MM-DD batch, whichever happened last -- so a PR
-# never gets double-credited across both release tracks.
+# previous batch release, whichever happened last -- so a PR never gets
+# double-credited across both release tracks.
+#
+# Tagged vX.Y.Z, sequential starting at v1.0.0 -- separate from the
+# cli-vX.Y.Z track, which has to mirror the real published npm version
+# and isn't ours to renumber. This track has no such anchor, so it gets
+# a normal incrementing version instead of a date stamp.
 #
 # Runs natively on this repo (not triggered cross-repo from the private
 # one, the way publish-cli.yml's own release step has to be), so the
@@ -62,7 +67,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="public-$(date -u +%Y-%m-%d)"
+          last_version=$(gh release list --repo "${{ github.repository }}" --limit 100 --json tagName --jq '[.[].tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(split(".") | map(tonumber)) | last // empty')
+          if [ -z "$last_version" ]; then
+            tag="v1.0.0"
+          else
+            IFS='.' read -r major minor patch <<< "${last_version#v}"
+            tag="v${major}.${minor}.$((patch + 1))"
+          fi
           # Title is just the tag, nothing else -- matches the convention
           # every other release on this repo uses (cli-v0.6.0's own title
           # is just "cli-v0.6.0"), and the plain "vX.Y.Z" style real
