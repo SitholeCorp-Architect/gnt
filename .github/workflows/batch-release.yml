@@ -1,0 +1,75 @@
+name: Batch release (public contributions)
+
+# Weekly digest of whatever merged into main since the last release --
+# not every PR deserves its own release (noisy: a repo where every doc
+# typo fix gets its own release entry trains people to ignore the
+# Releases tab), but waiting for an unrelated future npm version bump to
+# sweep up an external contribution isn't good either -- that's exactly
+# what almost happened to gnt-ai/gnt#12, the project's first outside PR,
+# before it got a manual one-off release instead. This is the automated
+# middle ground: check weekly, skip silently if nothing merged since the
+# last release, credit everyone by PR (via --generate-notes) if something
+# did.
+#
+# Diffs from whichever release is most recent chronologically -- a real
+# cli-vX.Y.Z npm release (see publish-cli.yml in the private repo) or a
+# previous public-YYYY-MM-DD batch, whichever happened last -- so a PR
+# never gets double-credited across both release tracks.
+#
+# Runs natively on this repo (not triggered cross-repo from the private
+# one, the way publish-cli.yml's own release step has to be), so the
+# default GITHUB_TOKEN with contents: write below is enough -- no
+# GH_RELEASE_TOKEN-style fine-grained PAT needed here.
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # every Monday, 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  batch-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Find the most recent release and check for new commits since it
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          last_tag=$(gh release list --repo "${{ github.repository }}" --limit 100 --json tagName,publishedAt --jq 'sort_by(.publishedAt) | last | .tagName // empty')
+          if [ -z "$last_tag" ]; then
+            echo "No prior release found on this repo -- nothing to diff against, skipping."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "last_tag=$last_tag" >> "$GITHUB_OUTPUT"
+          ahead=$(gh api "repos/${{ github.repository }}/compare/$last_tag...main" --jq '.ahead_by')
+          if [ "$ahead" -eq 0 ]; then
+            echo "Nothing merged since $last_tag -- skipping this week."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$ahead commit(s) since $last_tag -- cutting a batch release."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create the batch release
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="public-$(date -u +%Y-%m-%d)"
+          # Title is just the tag, nothing else -- matches the convention
+          # every other release on this repo uses (cli-v0.6.0's own title
+          # is just "cli-v0.6.0"), and the plain "vX.Y.Z" style real
+          # release feeds use. No editorializing title text.
+          gh release create "$tag" \
+            --repo "${{ github.repository }}" \
+            --target main \
+            --title "$tag" \
+            --notes-start-tag "${{ steps.check.outputs.last_tag }}" \
+            --generate-notes
