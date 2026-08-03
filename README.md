@@ -7,7 +7,7 @@
 </picture>
 </a>
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![npm](https://img.shields.io/npm/v/@gnt-ai/cli)](https://www.npmjs.com/package/@gnt-ai/cli) [![CI](https://github.com/gnt-ai/gnt/actions/workflows/ci.yml/badge.svg)](https://github.com/gnt-ai/gnt/actions/workflows/ci.yml)
+[![License](https://shieldcn.dev/github/license/gnt-ai/gnt.svg?variant=secondary)](LICENSE) [![npm](https://shieldcn.dev/npm/@gnt-ai/cli.svg?variant=secondary)](https://www.npmjs.com/package/@gnt-ai/cli) [![CI](https://github.com/gnt-ai/gnt/actions/workflows/ci.yml/badge.svg)](https://github.com/gnt-ai/gnt/actions/workflows/ci.yml)
 
 </div>
 
@@ -207,6 +207,6 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for dev setup and how to open a PR. Eve
 
 <div align="center">
 
-[![Discussions](https://img.shields.io/badge/discussions-github-blue)](https://github.com/gnt-ai/gnt/discussions) [![Issues](https://img.shields.io/github/issues/gnt-ai/gnt)](https://github.com/gnt-ai/gnt/issues) [![Code of conduct](https://img.shields.io/badge/code%20of%20conduct-CODE__OF__CONDUCT.md-lightgrey)](CODE_OF_CONDUCT.md)
+[![Discussions](https://shieldcn.dev/badge/discussions-github.svg?variant=secondary)](https://github.com/gnt-ai/gnt/discussions) [![Issues](https://shieldcn.dev/github/issues/gnt-ai/gnt.svg?variant=secondary)](https://github.com/gnt-ai/gnt/issues) [![Code of conduct](https://shieldcn.dev/badge/code%20of%20conduct-CODE_OF_CONDUCT.md.svg?variant=secondary)](CODE_OF_CONDUCT.md)
 
 </div>
