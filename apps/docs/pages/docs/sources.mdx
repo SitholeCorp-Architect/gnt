@@ -287,6 +287,10 @@ two read-only tools: `get_board_items_page` for board items and `get_updates` fo
 It never auto-discovers boards; you explicitly list the board IDs you want scanned, and it never
 reads users, workspace settings, or board metadata beyond what those two tools return.
 
+Because the adapter only calls `get_board_items_page` and `get_updates`, the read
+surface is structurally limited to item prose. No other monday.com tools are invoked,
+so no user profiles, workspace settings, or board configurations are ever fetched.
+
 Only an item's own text is ever read: the item's name, its column values joined into prose, and
 the text of updates posted on the item. Assignee names, status labels, dates, and any other
 structured fields are ignored. The adapter runs locally on your device through the same
