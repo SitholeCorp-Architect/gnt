@@ -19,10 +19,6 @@ Run the setup below once and every agent your team runs has a **git-native ruleb
 
 > Prefer not to run any of this yourself? The hosted version at [gntai.dev](https://gntai.dev) does the same thing without you standing up a Postgres instance.
 
-![A real terminal session of gnt prebrain scanning a repo, opening a PR, and getting merged](.github/assets/quickstart.png)
-
-*gnt prebrain scanning a repo, opening a PR, and getting it merged. A real terminal session, not a mockup.*
-
 ## Get started (30 seconds)
 
 ```bash
