@@ -276,3 +276,30 @@ into candidate rules, which land in your normal review queue exactly like any ot
 ever auto-approved. Disconnecting removes the stored credential immediately.
 
 </details>
+
+<details>
+<summary>**Monday.com**</summary>
+
+`gnt connect monday-mcp` stores a personal access token the same local-only way, and
+`gnt prebrain --monday-mcp --monday-boards <BOARD_ID>` reads straight from monday.com's own
+official MCP server, not through a custom REST client. The adapter deliberately limits itself to
+two read-only tools: `get_board_items_page` for board items and `get_updates` for item updates.
+It never auto-discovers boards; you explicitly list the board IDs you want scanned, and it never
+reads users, workspace settings, or board metadata beyond what those two tools return.
+
+Only an item's own text is ever read: the item's name, its column values joined into prose, and
+the text of updates posted on the item. Assignee names, status labels, dates, and any other
+structured fields are ignored. The adapter runs locally on your device through the same
+CLI-side privacy gate every other prebrain walker uses, and only masked text ever reaches
+extraction.
+
+```bash
+$ gnt connect monday-mcp
+$ gnt prebrain --monday-monday --monday-boards 123456789
+
+Found 18 candidate chunks:
+  Monday.com items: 12 chunks across 3 boards
+  Monday.com updates: 6 chunks across 2 boards
+```
+
+</details>
